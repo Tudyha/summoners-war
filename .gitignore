@@ -1,0 +1,4 @@
+.vscode/.ascript-sync.json
+feishu_credentials.py
+__pycache__/
+*.py[cod]

@@ -1,0 +1,115 @@
+"""Explicit runtime state grouped by workflow responsibility."""
+
+
+class RuntimeState(object):
+    def __init__(self):
+        self.last_action_at = 0.0
+        self.last_unknown_log_at = 0.0
+        self.last_scene = None
+        self.last_behavior = None
+        self.consecutive_errors = 0
+
+
+class FriendState(object):
+    def __init__(self):
+        self.last_request_at = 0.0
+        self.requests_disabled = False
+        self.candidate_cursor = 0
+        self.attempted_for_preparation = False
+
+    def should_request_for_support(self, battle):
+        return (
+            not self.requests_disabled
+            and not self.attempted_for_preparation
+            and battle.support_count_checked_for_preparation
+            and battle.support_monster_count < 6
+        )
+
+
+class BattleState(object):
+    def __init__(self):
+        self.needs_team_selection = False
+        self.needs_support_selection = False
+        self.checking_support_selection = False
+        self.support_checked = False
+        self.support_first_unavailable = False
+        self.support_monster_count = 0
+        self.support_count_checked_for_preparation = False
+        self.stage_list_scroll_count = 0
+
+
+class WorldMapState(object):
+    def __init__(self):
+        self.miss_count = 0
+        self.returning_home_for_task = False
+
+
+class NicknamePhase(object):
+    INACTIVE = "inactive"
+    TEXT_ENTERED = "text_entered"
+    WAITING_CONFIRM = "waiting_confirm"
+    CONFIRMING = "confirming"
+
+
+class NicknameState(object):
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        """Clear all per-account nickname workflow state."""
+        self.phase = NicknamePhase.INACTIVE
+        self.value = ""
+        self.input_attempts = 0
+        self.submit_attempts = 0
+        self.confirm_attempts = 0
+        self.last_input_at = 0.0
+        self.last_submit_at = 0.0
+        self.last_confirm_at = 0.0
+        self.last_wait_log_at = 0.0
+        self.completed = False
+
+    @property
+    def is_active(self):
+        return self.phase != NicknamePhase.INACTIVE
+
+
+class EndgamePhase(object):
+    INACTIVE = "inactive"
+    SUMMON = "summon"
+    RESET = "reset"
+    RESET_CONFIRM = "reset_confirm"
+
+
+class EndgameState(object):
+    def __init__(self):
+        self.phase = EndgamePhase.INACTIVE
+        self.inbox_claimed = False
+        self.light_dark_selected = False
+        self.summon_started = False
+        self.entering_summon_circle = False
+        self.summon_search_step = 0
+        self.summon_rejected_points = []
+        self.summon_probe_point = None
+
+    @property
+    def is_active(self):
+        return self.phase != EndgamePhase.INACTIVE
+
+
+class StopState(object):
+    def __init__(self):
+        self.for_five_star = False
+        self.before_reset = False
+
+
+class RunnerState(object):
+    """The complete mutable state of one automation run."""
+
+    def __init__(self):
+        self.runtime = RuntimeState()
+        self.friend = FriendState()
+        self.battle = BattleState()
+        self.world_map = WorldMapState()
+        self.nickname = NicknameState()
+        self.endgame = EndgameState()
+        self.stop = StopState()
