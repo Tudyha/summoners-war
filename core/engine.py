@@ -30,12 +30,16 @@ class AutomationEngine(object):
         print("[runner] reactive screen-driven engine started")
 
         while True:
-            if (
-                self.runner.state.stop.for_five_star
-                or self.runner.state.stop.before_reset
-            ):
-                time.sleep(5.0)
-                continue
+            stop = self.runner.state.stop
+            if stop.requested_by_operator:
+                print("[runner] stopped by Feishu operator decision")
+                return
+            if stop.for_five_star:
+                print("[runner] five-star reply window ended; script stopped")
+                return
+            if stop.before_reset:
+                print("[runner] stopped before data initialization")
+                return
 
             try:
                 context = self._capture_context()

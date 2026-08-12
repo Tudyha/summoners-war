@@ -29,6 +29,31 @@ class SummonRulesTests(unittest.TestCase):
             )
         )
 
+    def test_collaboration_icon_requires_cyan_red_and_cream_artwork(self):
+        self.assertTrue(
+            summon_rules.is_collaboration_scroll_icon_patch(0.34, 0.09, 0.18)
+        )
+        self.assertFalse(
+            summon_rules.is_collaboration_scroll_icon_patch(0.34, 0.0, 0.18)
+        )
+        self.assertFalse(
+            summon_rules.is_collaboration_scroll_icon_patch(0.34, 0.09, 0.0)
+        )
+
+    def test_accepts_result_panel_star_component(self):
+        self.assertTrue(
+            summon_rules.is_summon_result_star_component(
+                260, 27, 27, 0.36, 1.0, 1.0
+            )
+        )
+
+    def test_rejects_small_result_panel_gold_fragment(self):
+        self.assertFalse(
+            summon_rules.is_summon_result_star_component(
+                18, 7, 6, 0.43, 1.0, 1.0
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

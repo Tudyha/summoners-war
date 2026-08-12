@@ -100,6 +100,7 @@ Flow 通过显式传入的 `RunnerState` 和 `DeviceActions` 访问状态与副�
 ## 视觉边界
 
 - `vision/core.py`：OCR Observation、分辨率和每轮截图缓存。
+- 当前坐标和视觉阈值统一以 `1080×720` 为基准；暂不保证其他分辨率。
 - `vision/map.py`：世界地图和主城召唤阵候选。
 - `vision/battle_runtime.py`：战斗目标和自动战斗。
 - `vision/stage.py`：关卡、队伍和战斗控件。

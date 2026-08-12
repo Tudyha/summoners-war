@@ -54,25 +54,25 @@ class WorldMapFlow(object):
         new_maps = obs.matching(
             lambda row: "新" in row["text"]
             and len(row["text"]) <= 3
-            and scale_point((200, 0))[0] <= row["x"] <= scale_point((1450, 0))[0]
-            and scale_point((0, 50))[1] <= row["y"] <= scale_point((0, 760))[1]
+            and scale_point((135, 0))[0] <= row["x"] <= scale_point((978, 0))[0]
+            and scale_point((0, 40))[1] <= row["y"] <= scale_point((0, 608))[1]
             and not (
-                scale_point((350, 0))[0] <= row["x"] <= scale_point((720, 0))[0]
-                and row["y"] >= scale_point((0, 650))[1]
+                scale_point((236, 0))[0] <= row["x"] <= scale_point((486, 0))[0]
+                and row["y"] >= scale_point((0, 520))[1]
             )
         )
         kairos_labels = obs.matching(lambda row: "卡伊洛斯地下城" in row["text"])
         new_maps = [
             row for row in new_maps
             if not any(
-                abs(row["x"] - kairos["x"]) <= scale_point((300, 0))[0]
-                and abs(row["y"] - kairos["y"]) <= scale_point((0, 190))[1]
+                abs(row["x"] - kairos["x"]) <= scale_point((202, 0))[0]
+                and abs(row["y"] - kairos["y"]) <= scale_point((0, 152))[1]
                 for kairos in kairos_labels
             )
         ]
         if len(new_maps) == 1:
             self.state.world_map.miss_count = 0
-            _, offset_y = scale_point((0, 45))
+            _, offset_y = scale_point((0, 36))
             self.actions.click_point(
                 (new_maps[0]["x"], new_maps[0]["y"] + offset_y),
                 "enter map marked new",

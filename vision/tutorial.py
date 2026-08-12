@@ -2,6 +2,7 @@
 
 import re
 
+from ..core.collaboration_rules import is_gameplay_screen
 from ..core.summon_rules import is_summon_ui_title
 import time
 
@@ -49,11 +50,11 @@ def find_yellow_arrow():
     for contour in contours:
         area = float(cv2.contourArea(contour))
         x, y, box_width, box_height = cv2.boundingRect(contour)
-        if not (800.0 * area_scale <= area <= 4200.0 * area_scale):
+        if not (432.0 * area_scale <= area <= 2268.0 * area_scale):
             continue
         if not (
-            55 * scale_x <= box_width <= 85 * scale_x
-            and 52 * scale_y <= box_height <= 75 * scale_y
+            37.125 * scale_x <= box_width <= 57.375 * scale_x
+            and 41.6 * scale_y <= box_height <= 60 * scale_y
         ):
             continue
         fill = area / float(box_width * box_height)
@@ -112,8 +113,7 @@ def find_tutorial_highlight():
         return None
     height, width = image.shape[:2]
     scale_x, scale_y = display_scales(width, height)
-    # HoughCircles accepts one radius, so use the area-equivalent scale instead
-    # of the smaller axis. On 1080x720 this is sqrt(0.675 * 0.8), not 0.675.
+    # HoughCircles accepts one radius, so use the area-equivalent scale.
     scale = (scale_x * scale_y) ** 0.5
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (7, 7), 1.5)
@@ -121,11 +121,11 @@ def find_tutorial_highlight():
         blurred,
         cv2.HOUGH_GRADIENT,
         dp=1.2,
-        minDist=max(40, int(70 * scale)),
+        minDist=max(40, int(51.43 * scale)),
         param1=85,
         param2=18,
-        minRadius=max(18, int(24 * scale)),
-        maxRadius=max(35, int(105 * scale)),
+        minRadius=max(18, int(17.64 * scale)),
+        maxRadius=max(35, int(77.15 * scale)),
     )
     if circles is None:
         return None
@@ -141,12 +141,12 @@ def find_tutorial_highlight():
             continue
         distance_sq = (xx - center_x) ** 2 + (yy - center_y) ** 2
         best_ring = 0.0
-        for delta in (-10, -5, 0, 5, 10):
+        for delta in (-7, -4, 0, 4, 7):
             sample_radius = radius + int(delta * scale)
             if sample_radius <= 8:
                 continue
-            inner = max(1, sample_radius - max(2, int(3 * scale)))
-            outer = sample_radius + max(2, int(3 * scale))
+            inner = max(1, sample_radius - max(2, int(2.2 * scale)))
+            outer = sample_radius + max(2, int(2.2 * scale))
             annulus = (distance_sq >= inner * inner) & (distance_sq <= outer * outer)
             count = int(np.count_nonzero(annulus))
             if count:
@@ -161,12 +161,12 @@ def find_tutorial_highlight():
     best = candidates[0]
     if len(candidates) > 1 and best[0] - candidates[1][0] < 0.025:
         # Multiple equally strong rings are ambiguous; wait for another frame.
-        if abs(best[1] - candidates[1][1]) > 45 * scale or abs(best[2] - candidates[1][2]) > 45 * scale:
+        if abs(best[1] - candidates[1][1]) > 33 * scale or abs(best[2] - candidates[1][2]) > 33 * scale:
             return None
     return int(best[1]), int(best[2])
 
 def find_tutorial_text_overlay():
-    """Return the center of a generic dimmed tutorial text overlay.
+    """Return the next safe target for a generic tutorial text overlay.
 
     These overlays can contain changing copy, but consistently dim the entire
     scene and draw a wide, shallow, closed gold/brown instruction frame.
@@ -179,8 +179,42 @@ def find_tutorial_text_overlay():
     value = hsv[:, :, 2]
 
     dark_ratio = float(np.count_nonzero(value <= 70)) / float(value.size)
-    if np.median(value) > 45 or dark_ratio < 0.75:
+    # Story guides use a very dark mask, while the collaboration minigame
+    # keeps the board readable beneath a substantially lighter one.  The real
+    # minigame guide measured median V=69 and dark_ratio=0.515.  The closed
+    # instruction-frame test below remains required, so these relaxed mask
+    # limits do not turn an ordinary dim battle scene into a tutorial.
+    if np.median(value) > 75 or dark_ratio < 0.48:
         return None
+
+    # A dimmed business modal can also contain several gold/brown frames. The
+    # item-replacement page is visually distinct because a large neutral-light
+    # window remains undimmed (verified component: 27.1% of the frame,
+    # 526x404 at 1080x720). Generic tutorial cards never expose such a large
+    # bright window, so leave this screen to its owning flow even when OCR
+    # transiently misses the modal title.
+    bright_modal_mask = (
+        (value >= 140) & (hsv[:, :, 1] <= 110)
+    ).astype(np.uint8) * 255
+    bright_modal_mask = cv2.morphologyEx(
+        bright_modal_mask,
+        cv2.MORPH_CLOSE,
+        cv2.getStructuringElement(cv2.MORPH_RECT, (15, 15)),
+    )
+    bright_contours = cv2.findContours(
+        bright_modal_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )[-2]
+    for bright_contour in bright_contours:
+        bright_x, bright_y, bright_width, bright_height = cv2.boundingRect(
+            bright_contour
+        )
+        bright_area = float(cv2.contourArea(bright_contour))
+        if (
+            bright_area >= width * height * 0.14
+            and bright_width >= width * 0.40
+            and bright_height >= height * 0.35
+        ):
+            return None
 
     border_mask = cv2.inRange(
         hsv,
@@ -206,6 +240,11 @@ def find_tutorial_text_overlay():
         aspect = box_width / float(box_height)
         if not 2.2 <= aspect <= 7.0:
             continue
+        center_y = y + box_height / 2.0
+        # Footer/navigation panels can have the same gold rectangular border,
+        # but verified tutorial instruction cards remain in the middle 60%.
+        if not height * 0.16 <= center_y <= height * 0.76:
+            continue
 
         area = float(cv2.contourArea(contour))
         fill = area / float(box_width * box_height)
@@ -225,9 +264,11 @@ def find_tutorial_text_overlay():
     )
     if ripple_target is not None:
         return ripple_target
-    # The instruction panel is explanatory text, never the click target. Wait
-    # for another decision tick when the animated ripple is not unambiguous.
-    return None
+    # Some collaboration guides are static and have no animated ripple at all
+    # (five fresh real-device frames were pixel-identical).  They advance when
+    # the framed explanation itself is tapped.  Keeping the fallback inside
+    # the already-proven frame avoids clicking arbitrary dim parts of battle.
+    return int(x + box_width / 2), int(y + box_height / 2)
 
 def _find_tutorial_ripple_motion(first_image, overlay_box):
     """Locate the animated concentric ripple from a short frame sequence."""
@@ -296,10 +337,18 @@ def _find_tutorial_ripple_motion(first_image, overlay_box):
 def dialogue_present(observation):
     """Detect the game's bottom dialogue panel without treating menus as dialogue.
 
-    Verified dialogue layouts place a short speaker label near an outer edge at
-    y=620..760 and one or more sentences below y=735. Both anchors are required.
+    Verified 1080x720 dialogue layouts place a short speaker label near an
+    outer edge and one or more sentences in the bottom panel. Both anchors are
+    required.
     """
     width, height = display_size()
+
+    # Dice results place several short item values along the bottom and a
+    # right-side confirmation button at dialogue height. Those fragments can
+    # satisfy the generic speaker/body geometry, but the stable gameplay
+    # anchors (关卡 plus 体力/护盾/骰子) prove CollaborationFlow ownership.
+    if is_gameplay_screen(observation.texts):
+        return False
 
     # Summon-result monster names and the bottom crystal price can satisfy the
     # loose speaker/body geometry. The result title is a definitive veto.
@@ -318,6 +367,15 @@ def dialogue_present(observation):
     # must leave ownership to BattleFlow instead of tapping the dialogue point.
     if observation.contains("掉落信息") and (
         observation.contains("难度") or observation.contains("普通")
+    ):
+        return False
+
+    # Battle preparation places the short `开始战斗` label at the lower-right
+    # speaker-plaque height. A transient punctuated OCR fragment from monster
+    # cards can then satisfy the body rule. These independent page anchors
+    # establish battle ownership even when `结束战斗` is misread (`结東战!`).
+    if observation.contains("开始战") and (
+        observation.contains("对战") or observation.contains("领袖技能")
     ):
         return False
 
@@ -449,7 +507,13 @@ def dialogue_present(observation):
         # (verified false hit: `异界。`, 209px for 3 chars at 1080px). Normal
         # dialogue glyphs remain within this generous per-character width.
         average_character_width = (int(right) - int(left)) / float(len(compact))
-        return average_character_width <= width * 0.05
+        # Full-width activity/page footers terminate almost at the screen edge
+        # (verified collaboration footer: right=1037/1080). Dialogue copy is
+        # inset inside its bottom panel and does not reach that edge.
+        return (
+            average_character_width <= width * 0.05
+            and int(right) <= int(width * 0.94)
+        )
 
     body_rows = observation.matching(looks_like_dialogue_body)
     return bool(speaker_rows and body_rows)

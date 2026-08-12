@@ -128,8 +128,8 @@ def auto_battle_is_off():
     height, width = image.shape[:2]
     scale_x, scale_y = display_scales(width, height)
     area_scale = scale_x * scale_y
-    x0, y0 = scale_point((260, 805))
-    x1, y1 = scale_point((330, 875))
+    x0, y0 = scale_point((175, 644))
+    x1, y1 = scale_point((222, 700))
     button = image[y0:y1, x0:x1]
     if button.size == 0:
         return False
@@ -144,11 +144,11 @@ def auto_battle_is_off():
     for contour in contours:
         area = float(cv2.contourArea(contour))
         box_x, box_y, box_width, box_height = cv2.boundingRect(contour)
-        if not (350 * area_scale <= area <= 1500 * area_scale):
+        if not (189 * area_scale <= area <= 810 * area_scale):
             continue
         if not (
-            25 * scale_x <= box_width <= 55 * scale_x
-            and 30 * scale_y <= box_height <= 60 * scale_y
+            16.875 * scale_x <= box_width <= 37.125 * scale_x
+            and 24 * scale_y <= box_height <= 48 * scale_y
         ):
             continue
         fill = area / float(box_width * box_height)
@@ -157,8 +157,8 @@ def auto_battle_is_off():
         center_x = box_x + box_width / 2.0
         center_y = box_y + box_height / 2.0
         if not (
-            22 * scale_x <= center_x <= 48 * scale_x
-            and 20 * scale_y <= center_y <= 50 * scale_y
+            14.85 * scale_x <= center_x <= 32.4 * scale_x
+            and 16 * scale_y <= center_y <= 40 * scale_y
         ):
             continue
         perimeter = cv2.arcLength(contour, True)

@@ -111,6 +111,18 @@ class SceneRecognizerTests(unittest.TestCase):
 
         self.assertEqual(Scene.UNKNOWN, match.scene)
 
+    def test_battle_preparation_survives_corrupted_end_battle_label(self):
+        observation = FakeObservation((
+            "领柚枝能: 无增益状态",
+            "对战",
+            "SB\n开始战",
+            "结東战!",
+        ))
+
+        match = scene_recognizer.recognize_scene(observation)
+
+        self.assertEqual(Scene.BATTLE_PREPARATION, match.scene)
+
     def test_summon_ui_accepts_split_light_dark_evidence(self):
         observation = FakeObservation(("光明", "黑暗召唤书", "特别召唤"))
 

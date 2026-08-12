@@ -65,7 +65,7 @@ class HomeFlow(object):
             # inbox as a safe modal round-trip to clear the selected object.
             inbox_rows = obs.matching(
                 lambda row: "收件箱" in row["text"]
-                and row["x"] <= scale_point((250, 0))[0]
+                and row["x"] <= scale_point((168, 0))[0]
             )
             if len(inbox_rows) == 1:
                 self.actions.click_row(

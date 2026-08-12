@@ -2,7 +2,10 @@
 
 import cv2
 import numpy as np
-from ..core.map_rules import is_bright_world_map_star
+from ..core.map_rules import (
+    is_bright_world_map_star,
+    is_home_summon_circle_component,
+)
 from .core import capture_frame_image as capture_cv
 from .core import display_scales, scale_point
 
@@ -60,19 +63,19 @@ def find_world_map_in_progress_area(observation):
             or any(suffix in text for suffix in story_suffixes)
         ):
             continue
-        if row["x"] < scale_point((180, 0))[0] or row["x"] > scale_point((1450, 0))[0]:
+        if row["x"] < scale_point((121, 0))[0] or row["x"] > scale_point((978, 0))[0]:
             continue
-        if row["y"] < scale_point((0, 80))[1] or row["y"] > scale_point((0, 760))[1]:
+        if row["y"] < scale_point((0, 64))[1] or row["y"] > scale_point((0, 608))[1]:
             continue
         rows.append(row)
 
     candidates = []
     for row in rows:
         star_rect = [
-            max(0, int(row["x"] - 75 * scale_x)),
-            max(0, int(row["y"] + 28 * scale_y)),
-            min(width, int(row["x"] + 75 * scale_x)),
-            min(height, int(row["y"] + 72 * scale_y)),
+            max(0, int(row["x"] - 50.625 * scale_x)),
+            max(0, int(row["y"] + 22.4 * scale_y)),
+            min(width, int(row["x"] + 50.625 * scale_x)),
+            min(height, int(row["y"] + 57.6 * scale_y)),
         ]
         if star_rect[0] >= star_rect[2] or star_rect[1] >= star_rect[3]:
             continue
@@ -163,10 +166,10 @@ def world_map_area_star_count(observation, name_fragments):
     scale_x, scale_y = display_scales(width, height)
     row = rows[0]
     star_rect = [
-        max(0, int(row["x"] - 75 * scale_x)),
-        max(0, int(row["y"] + 28 * scale_y)),
-        min(width, int(row["x"] + 75 * scale_x)),
-        min(height, int(row["y"] + 72 * scale_y)),
+        max(0, int(row["x"] - 50.625 * scale_x)),
+        max(0, int(row["y"] + 22.4 * scale_y)),
+        min(width, int(row["x"] + 50.625 * scale_x)),
+        min(height, int(row["y"] + 57.6 * scale_y)),
     ]
     if star_rect[0] >= star_rect[2] or star_rect[1] >= star_rect[3]:
         return None
@@ -293,7 +296,6 @@ def find_home_magic_circle_candidates(excluded_points=None):
     height, width = image.shape[:2]
     scale_x = width / 1080.0
     scale_y = height / 720.0
-    area_scale = scale_x * scale_y
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
 
     cyan = cv2.inRange(
@@ -330,24 +332,25 @@ def find_home_magic_circle_candidates(excluded_points=None):
         x, y, box_width, box_height = cv2.boundingRect(contour)
         center_x = int(x + box_width / 2)
         center_y = int(y + box_height / 2)
+        fill_ratio = area / float(max(1, box_width * box_height))
         if not (
             120 * scale_x <= center_x <= 960 * scale_x
             and 90 * scale_y <= center_y <= 590 * scale_y
-            and 100 * scale_x <= box_width <= 150 * scale_x
-            and 70 * scale_y <= box_height <= 145 * scale_y
-            and 4500 * area_scale <= area <= 10000 * area_scale
+            and is_home_summon_circle_component(
+                area,
+                box_width,
+                box_height,
+                fill_ratio,
+                scale_x,
+                scale_y,
+            )
         ):
             continue
 
-        aspect = box_width / float(max(1, box_height))
-        fill_ratio = area / float(max(1, box_width * box_height))
-        # Across live 1080x720 views the Summonhenge core measured 129-133px
-        # wide, 93-102px high, area 6867-8993, and aspect 1.30-1.43.
-        # The dimensional portal is nearly round (aspect 0.95), while castle
-        # roof highlights are wider (aspect 1.62) and much smaller. The mana
-        # pool false hit is also larger (177x129, area 12388).
-        if not 1.15 <= aspect <= 1.5 or not 0.45 <= fill_ratio <= 0.9:
-            continue
+        # Verified Summonhenge profiles now include 129-133x93-102 at normal
+        # zoom and 164x102 at the wider home view. The dimensional portal is
+        # nearly round, the 177x129 mana pool is too tall, and roof highlights
+        # with a similar aspect are below the minimum component area.
         if any(
             abs(center_x - point[0]) <= 65 * scale_x
             and abs(center_y - point[1]) <= 65 * scale_y

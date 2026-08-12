@@ -152,6 +152,7 @@ class FriendFlow(object):
             or obs.contains("重新发送战斗结果")
             or obs.contains("无法找到战斗信息")
             or obs.contains("好友数已达上限")
+            or obs.contains("你们已经是好友")
             or obs.contains_all("好友数", "上限")
             or obs.contains_all("邀请好友", "上限")
         )
@@ -270,9 +271,9 @@ class FriendFlow(object):
 
     def _chat_player_candidates(self, obs):
         candidates = []
-        max_name_left = scale_point((220, 0))[0]
-        min_chat_y = scale_point((0, 130))[1]
-        max_chat_y = scale_point((0, 800))[1]
+        max_name_left = scale_point((148, 0))[0]
+        min_chat_y = scale_point((0, 104))[1]
+        max_chat_y = scale_point((0, 640))[1]
         for row in obs.rows:
             text = row["text"]
             open_index = text.find("[")
@@ -321,8 +322,8 @@ class FriendFlow(object):
             # proportional character-width estimation can drift onto that
             # icon. Use a small verified inset from the row's left edge and
             # cap it inside the sender-name column instead.
-            safe_inset_x = scale_point((36, 0))[0]
-            name_column_right = scale_point((150, 0))[0]
+            safe_inset_x = scale_point((24, 0))[0]
+            name_column_right = scale_point((101, 0))[0]
             return (
                 max(left + 4, min(left + safe_inset_x, name_column_right)),
                 int((top + bottom) / 2.0),
@@ -331,7 +332,7 @@ class FriendFlow(object):
         # Candidates without a rect are normally rejected. Keep this fallback
         # in the same safe left-side name column; never use the row centre,
         # which may land on a battle-result or speaker icon.
-        return scale_point((105, 0))[0], row["y"]
+        return scale_point((70, 0))[0], row["y"]
 
     def _chat_player_name(self, row):
         """Return the bracketed sender name used to avoid duplicate requests."""
@@ -450,6 +451,7 @@ class FriendFlow(object):
             request_result.contains("申请好友完毕")
             or request_result.contains_all("好友", "申请", "成功")
             or request_result.contains_all("好友", "申请", "发送")
+            or request_result.contains_all("好友", "已经", "你们")
         ):
             self.actions.click_xy("friend_request_confirm", "confirm friend request result")
         else:
@@ -472,7 +474,7 @@ class FriendFlow(object):
         start_battles = [] if obs is None else obs.matching(
             lambda row: (
                 ("开始战斗" in row["text"] or "开始战" in row["text"])
-                and row["x"] >= scale_point((1100, 0))[0]
+                and row["x"] >= scale_point((742, 0))[0]
             )
         )
         if len(start_battles) != 1:

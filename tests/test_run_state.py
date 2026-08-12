@@ -45,6 +45,42 @@ class RunnerStateTests(unittest.TestCase):
 
         self.assertEqual([], second.endgame.summon_rejected_points)
 
+    def test_collaboration_mode_and_reset_are_per_account(self):
+        state = state_module.RunnerState(state_module.RunMode.COLLABORATION)
+        state.collaboration.started = True
+        state.collaboration.achievement_count = 15
+        state.collaboration.in_run = True
+        state.collaboration.skill_step = "upgrade"
+        state.collaboration.maxed_skill_indices.update((11, 9))
+        state.collaboration.pending_skill_index = 9
+        state.collaboration.prepare_step = "confirm_new"
+        state.collaboration.replacement_attempts = 3
+        state.collaboration.shop_step = "confirm"
+        state.collaboration.phase = state_module.CollaborationPhase.COMPLETE
+        state.endgame.scroll_kind = state_module.SummonScrollKind.COLLABORATION
+
+        state.collaboration.reset(allow_internal_resume=False)
+
+        self.assertEqual(state_module.RunMode.COLLABORATION, state.run_mode)
+        self.assertFalse(state.collaboration.started)
+        self.assertEqual(0, state.collaboration.achievement_count)
+        self.assertFalse(state.collaboration.in_run)
+        self.assertEqual("select", state.collaboration.skill_step)
+        self.assertEqual(set(), state.collaboration.maxed_skill_indices)
+        self.assertIsNone(state.collaboration.pending_skill_index)
+        self.assertFalse(state.collaboration.allow_internal_resume)
+        self.assertEqual("select_old", state.collaboration.prepare_step)
+        self.assertEqual(0, state.collaboration.replacement_attempts)
+        self.assertEqual("select", state.collaboration.shop_step)
+        self.assertEqual(
+            state_module.CollaborationPhase.OPEN_EVENT,
+            state.collaboration.phase,
+        )
+        self.assertEqual(
+            state_module.SummonScrollKind.COLLABORATION,
+            state.endgame.scroll_kind,
+        )
+
     def test_friend_request_requires_measured_support_count_below_six(self):
         state = state_module.RunnerState()
 

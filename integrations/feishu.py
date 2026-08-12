@@ -1,4 +1,4 @@
-"""Send light/dark summon-result notifications to Feishu."""
+"""Send summon results to Feishu and read the operator's reply."""
 
 import json
 import time
@@ -8,6 +8,8 @@ import requests
 
 from ascript.android.screen import capture_cv
 from ascript.android.system import Device
+
+from ..core.feishu_rules import decision_from_messages
 
 try:
     from .. import feishu_credentials
@@ -105,16 +107,33 @@ def _upload_screenshot(token):
     return _response_data(response, "image upload").get("image_key")
 
 
-def _send_post(token, device_label, is_five_star, image_key):
-    result_text = "五星" if is_five_star else "非五星"
+def _send_post(token, device_label, is_five_star, image_key, summon_kind):
+    if is_five_star is None:
+        result_text = "无法判定（禁止自动初始化）"
+        action_text = "请直接回复本消息：停止 或 初始化"
+    elif is_five_star:
+        result_text = "五星"
+        action_text = (
+            "五星结果将保留5分钟；期间回复：初始化 或 停止；"
+            "5分钟无回复则停止脚本"
+        )
+    else:
+        result_text = "非五星"
+        action_text = "脚本将自动初始化数据"
+    summon_text = "联动召唤" if summon_kind == "collaboration" else "光暗召唤"
     rows = [
         [
             {
                 "tag": "text",
-                "text": "设备：{}\n判定：{}\n时间：{}".format(
+                "text": (
+                    "设备：{}\n召唤：{}\n判定：{}\n时间：{}\n"
+                    "{}"
+                ).format(
                     device_label,
+                    summon_text,
                     result_text,
                     time.strftime("%Y-%m-%d %H:%M:%S"),
+                    action_text,
                 ),
             }
         ]
@@ -123,7 +142,7 @@ def _send_post(token, device_label, is_five_star, image_key):
         rows.append([{"tag": "img", "image_key": image_key}])
     post = {
         "zh_cn": {
-            "title": "光暗召唤结果 - {}".format(device_label),
+            "title": "{}结果 - {}".format(summon_text, device_label),
             "content": rows,
         }
     }
@@ -141,7 +160,7 @@ def _send_post(token, device_label, is_five_star, image_key):
     return _response_data(response, "message send").get("message_id")
 
 
-def send_summon_result(is_five_star):
+def send_summon_result(is_five_star, summon_kind="light_dark"):
     """Send one summon-result notification without changing runner state."""
     if feishu_credentials is None:
         return False, "credentials file is missing"
@@ -162,10 +181,36 @@ def send_summon_result(is_five_star):
             _device_label(),
             is_five_star,
             image_key,
+            summon_kind,
         )
-        detail = message_id or "sent"
+        if not message_id:
+            raise RuntimeError("message send response is missing message_id")
         if image_error:
-            detail += "; screenshot omitted: {}".format(image_error)
-        return True, detail
+            print("[feishu] screenshot omitted: {}".format(image_error))
+        return True, message_id
     except Exception as exc:
         return False, str(exc)
+
+
+def poll_summon_decision(parent_message_id, sent_at):
+    """Poll the configured chat for a reply to this device's result message."""
+    if feishu_credentials is None:
+        return None, "credentials file is missing"
+    try:
+        token = _tenant_access_token()
+        response = requests.get(
+            MESSAGE_URL,
+            params={
+                "container_id_type": "chat",
+                "container_id": feishu_credentials.CHAT_ID,
+                "start_time": str(int(sent_at)),
+                "sort_type": "ByCreateTimeDesc",
+                "page_size": 50,
+            },
+            headers={"Authorization": "Bearer {}".format(token)},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        items = _response_data(response, "message history").get("items") or []
+        return decision_from_messages(items, parent_message_id), "ok"
+    except Exception as exc:
+        return None, str(exc)

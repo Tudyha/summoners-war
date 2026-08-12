@@ -4,16 +4,20 @@ import time
 import re
 
 from .. import config
-from ..core.run_state import EndgamePhase
+from ..core.run_state import EndgamePhase, SummonScrollKind
 from ..core.scene_recognizer import (
     home_visible,
     message_center_match,
     summon_ui_match,
 )
-from ..integrations.feishu import send_summon_result
+from ..integrations.feishu import poll_summon_decision, send_summon_result
 from ..vision.core import scale_point
 from ..vision.map import find_home_magic_circle_candidates
-from ..vision.summon import find_light_dark_scroll_icon
+from ..vision.summon import (
+    find_collaboration_scroll_icon,
+    find_light_dark_scroll_icon,
+    find_summon_result_star_count,
+)
 from ..vision.tutorial import dialogue_present
 
 
@@ -25,19 +29,60 @@ class EndgameFlow(object):
     def _lower_confirm_rows(self, obs):
         return obs.matching(
             lambda row: row["text"].startswith("确认")
-            and row["y"] >= scale_point((0, 500))[1]
+            and row["y"] >= scale_point((0, 400))[1]
         )
 
     def _claim_rows(self, obs):
         return obs.matching(
             lambda row: ("领取" in row["text"] or "收取" in row["text"])
-            and row["x"] >= scale_point((900, 0))[0]
+            and row["x"] >= scale_point((607, 0))[0]
         )
 
-    def _summon_result_is_five_star(self, obs):
+    def _summon_result_star_count(self, obs):
+        evidence = []
+        visual_count = find_summon_result_star_count()
+        if visual_count in (3, 4, 5):
+            evidence.append(("visual", visual_count))
+
         if obs.contains("5星") or obs.contains("五星"):
-            return True
-        return any("★★★★★" in text or "★5" in text for text in obs.texts)
+            evidence.append(("ocr_label", 5))
+        for text in obs.texts:
+            ocr_star_count = text.count("★")
+            if ocr_star_count in (3, 4, 5):
+                evidence.append(("ocr_stars", ocr_star_count))
+            elif "★5" in text:
+                evidence.append(("ocr_stars", 5))
+
+        # Fresh 3/4/5-star monsters have maximum levels 25/30/35. ML Kit
+        # usually reads this row even when decorative stars are missed.
+        max_level_rows = obs.matching(lambda row: "最大等级" in row["text"])
+        level_rows = obs.matching(
+            lambda row: re.search(r"(^|\D)(25|30|35)($|\D)", row["text"])
+            is not None
+        )
+        for label in max_level_rows:
+            for value in level_rows:
+                if (
+                    abs(label["y"] - value["y"]) <= scale_point((0, 48))[1]
+                    and label["x"] <= value["x"] <= label["x"] + scale_point((260, 0))[0]
+                ):
+                    match = re.search(
+                        r"(^|\D)(25|30|35)($|\D)", value["text"]
+                    )
+                    evidence.append((
+                        "max_level",
+                        {"25": 3, "30": 4, "35": 5}[match.group(2)],
+                    ))
+
+        counts = set(item[1] for item in evidence)
+        if len(counts) == 1:
+            return counts.pop()
+        if len(counts) > 1:
+            print("[result] conflicting summon star evidence: {}".format(evidence))
+        return None
+
+    def _summon_result_is_five_star(self, obs):
+        return self._summon_result_star_count(obs) == 5
 
     def _summon_result_visible(self, obs):
         return (
@@ -58,12 +103,82 @@ class EndgameFlow(object):
                 return matches[0]
         return None
 
-    def enter(self, reason):
+    def enter(self, reason, scroll_kind=SummonScrollKind.LIGHT_DARK):
         self.state.endgame.phase = EndgamePhase.SUMMON
         self.state.endgame.inbox_claimed = False
         self.state.endgame.light_dark_selected = False
+        self.state.endgame.scroll_kind = scroll_kind
+        self.state.endgame.feishu_message_id = None
+        self.state.endgame.feishu_sent_at = 0
+        self.state.endgame.last_feishu_poll_at = 0
+        self.state.endgame.last_feishu_send_at = 0
+        self.state.endgame.reply_wait_started_at = 0
         self._reset_summon_search()
-        print("[endgame] {}; switch to mailbox/summon flow".format(reason))
+        print("[endgame] {}; switch to mailbox/{} summon flow".format(
+            reason, scroll_kind
+        ))
+
+    def _confirm_summon_result(self, obs, reason):
+        confirms = self._lower_confirm_rows(obs)
+        if confirms:
+            self.actions.click_row(confirms[0], reason)
+        else:
+            self.actions.click_xy("summon_result_confirm", reason)
+
+    def _begin_game_reset(self):
+        state = self.state.endgame
+        state.phase = EndgamePhase.RESET
+        state.reply_wait_started_at = 0
+        state.inbox_claimed = False
+        state.light_dark_selected = False
+        self._reset_summon_search()
+        self.state.battle.needs_team_selection = False
+        self.state.battle.needs_support_selection = False
+
+    def _handle_feishu_reply_wait(self, obs):
+        state = self.state.endgame
+        now = time.time()
+        five_star_timed_out = (
+            state.summon_was_five_star
+            and state.reply_wait_started_at > 0
+            and now - state.reply_wait_started_at
+            >= config.FIVE_STAR_REPLY_TIMEOUT_SECONDS
+        )
+        if (
+            not five_star_timed_out
+            and now - state.last_feishu_poll_at
+            < config.FEISHU_REPLY_POLL_SECONDS
+        ):
+            return True
+        state.last_feishu_poll_at = now
+        decision, detail = poll_summon_decision(
+            state.feishu_message_id,
+            state.feishu_sent_at,
+        )
+        if decision == "stop":
+            self.state.stop.requested_by_operator = True
+            print("[feishu] operator replied stop; terminate script before reset")
+            return True
+        if decision == "reset":
+            if self._summon_result_visible(obs):
+                self._confirm_summon_result(
+                    obs,
+                    "confirm summon result after Feishu reset decision",
+                )
+            self._begin_game_reset()
+            print("[feishu] operator replied initialize; continue reset flow")
+            return True
+        if detail != "ok":
+            print("[feishu] reply poll failed; will retry: {}".format(detail))
+            return True
+        if five_star_timed_out:
+            self.state.stop.for_five_star = True
+            print(
+                "[feishu] no five-star decision within {} seconds; stop script".format(
+                    config.FIVE_STAR_REPLY_TIMEOUT_SECONDS
+                )
+            )
+        return True
 
     def _reset_summon_search(self):
         self.state.endgame.summon_started = False
@@ -73,14 +188,14 @@ class EndgameFlow(object):
         self.state.endgame.summon_probe_point = None
 
     def _summon_search_swipes(self):
-        # These are 1600x900 reference coordinates. Use short drags so a
+        # These are 1080x720 coordinates. Use short drags so a
         # visible Summonhenge is not swept past between observations.
         # Drag the island up-right to move the viewport toward its lower-left,
         # where the live castle-start test reached the Summonhenge fastest.
-        toward_lower_left = ((500, 600), (800, 420))
-        left = ((1050, 500), (700, 500))
+        toward_lower_left = ((337, 480), (540, 336))
+        left = ((708, 400), (472, 400))
         right = (left[1], left[0])
-        up = ((800, 650), (800, 450))
+        up = ((540, 520), (540, 360))
         return (
             [toward_lower_left] * 3
             + [right] * 2
@@ -148,6 +263,9 @@ class EndgameFlow(object):
             self.actions.click_xy("dialogue", "advance NPC dialogue during endgame")
             return True
 
+        if self.state.endgame.phase == EndgamePhase.WAIT_FEISHU_REPLY:
+            return self._handle_feishu_reply_wait(obs)
+
         if self.state.endgame.phase in (
             EndgamePhase.RESET,
             EndgamePhase.RESET_CONFIRM,
@@ -170,6 +288,7 @@ class EndgameFlow(object):
                 self.state.endgame.light_dark_selected = False
                 self._reset_summon_search()
                 self.state.nickname.reset()
+                self.state.collaboration.reset(allow_internal_resume=False)
                 self.state.battle.needs_team_selection = False
                 self.state.battle.needs_support_selection = False
                 return True
@@ -283,7 +402,7 @@ class EndgameFlow(object):
         if obs.contains("可以领取以下"):
             collect_rows = obs.matching(
                 lambda row: row["text"] in ("收取", "领取")
-                and row["y"] >= scale_point((0, 600))[1]
+                and row["y"] >= scale_point((0, 480))[1]
             )
             if collect_rows:
                 self.actions.click_row(
@@ -323,7 +442,7 @@ class EndgameFlow(object):
         if obs.contains("礼物箱") and not self.state.endgame.inbox_claimed:
             claim_all_rows = obs.matching(
                 lambda row: "键领取" in row["text"]
-                and row["x"] >= scale_point((1050, 0))[0]
+                and row["x"] >= scale_point((708, 0))[0]
             )
             if claim_all_rows:
                 self.actions.click_row(
@@ -393,10 +512,10 @@ class EndgameFlow(object):
         if home_visible(obs) and not self.state.endgame.inbox_claimed:
             inbox_rows = obs.matching(
                 lambda row: "收件" in row["text"]
-                and row["x"] <= scale_point((200, 0))[0]
-                and scale_point((0, 350))[1]
+                and row["x"] <= scale_point((135, 0))[0]
+                and scale_point((0, 280))[1]
                 <= row["y"]
-                <= scale_point((0, 580))[1]
+                <= scale_point((0, 464))[1]
             )
             if len(inbox_rows) == 1:
                 self.actions.click_row(
@@ -422,6 +541,21 @@ class EndgameFlow(object):
             return True
 
         if self._summon_ui_visible(obs) and not self.state.endgame.light_dark_selected:
+            if self.state.endgame.scroll_kind == SummonScrollKind.COLLABORATION:
+                collaboration_icon = find_collaboration_scroll_icon()
+                if collaboration_icon is not None:
+                    self.actions.click_point(
+                        collaboration_icon,
+                        "select collaboration summon scroll by visual icon",
+                    )
+                    self.state.endgame.light_dark_selected = True
+                else:
+                    print(
+                        "[endgame] collaboration summon scroll icon not found; "
+                        "wait for visual retry without summoning"
+                    )
+                return True
+
             light_dark_icon = find_light_dark_scroll_icon()
             if light_dark_icon is not None:
                 self.actions.click_point(
@@ -455,25 +589,35 @@ class EndgameFlow(object):
                     "特别召唤" in row["text"]
                     or "特別召唤" in row["text"]
                 )
-                and row["x"] <= scale_point((900, 0))[0]
-                and row["y"] >= scale_point((0, 620))[1]
+                and row["x"] <= scale_point((607, 0))[0]
+                and row["y"] >= scale_point((0, 496))[1]
             )
             if special_summon_rows:
                 self.actions.click_row(
                     special_summon_rows[0],
-                    "summon light-dark scroll with rate up",
+                    "summon selected scroll with rate up",
                 )
             else:
                 self.actions.click_xy(
                     "special_summon_button",
-                    "summon light-dark scroll with rate up",
+                    "summon selected scroll with rate up",
                 )
             self.state.endgame.summon_started = True
             return True
 
         if self.state.endgame.summon_started and self._summon_result_visible(obs):
-            is_five_star = self._summon_result_is_five_star(obs)
-            notified, notification_detail = send_summon_result(is_five_star)
+            star_count = self._summon_result_star_count(obs)
+            is_five_star = None if star_count is None else star_count == 5
+            if (
+                time.time() - self.state.endgame.last_feishu_send_at
+                < config.FEISHU_REPLY_POLL_SECONDS
+            ):
+                return True
+            self.state.endgame.last_feishu_send_at = time.time()
+            notified, notification_detail = send_summon_result(
+                is_five_star,
+                self.state.endgame.scroll_kind,
+            )
             if notified:
                 print(
                     "[feishu] summon result notification sent: {}".format(
@@ -486,36 +630,60 @@ class EndgameFlow(object):
                         notification_detail
                     )
                 )
-            if is_five_star:
-                self.state.stop.for_five_star = True
-                print("[result] five-star monster found; stopping reroll loop")
-                return True
             print(
-                "[result] non-five-star summon observation: {}".format(
+                "[result] summon stars={} observation: {}".format(
+                    star_count if star_count is not None else "unknown",
                     obs.compact_text()
                 )
             )
-            confirms = self._lower_confirm_rows(obs)
-            if len(confirms) >= 1:
-                self.actions.click_row(confirms[0], "confirm non-five-star summon result")
-            else:
-                self.actions.click_xy(
-                    "summon_result_confirm",
-                    "confirm non-five-star summon result",
+            if not notified:
+                # Keep the result screen and retry sending; resetting without
+                # an operator decision would violate the endgame contract.
+                return True
+            self.state.endgame.feishu_message_id = notification_detail
+            self.state.endgame.feishu_sent_at = int(time.time()) - 2
+            self.state.endgame.summon_was_five_star = is_five_star is True
+
+            if star_count == 5:
+                self.state.endgame.reply_wait_started_at = time.time()
+                self.state.endgame.last_feishu_poll_at = 0
+                self.state.endgame.phase = EndgamePhase.WAIT_FEISHU_REPLY
+                print(
+                    "[result] verified five-star monster; wait {} seconds for "
+                    "Feishu initialize/stop reply".format(
+                        config.FIVE_STAR_REPLY_TIMEOUT_SECONDS
+                    )
                 )
-            time.sleep(1.0)
-            if config.AUTO_RESET_AFTER_NON_FIVE_STAR:
-                self.state.endgame.phase = EndgamePhase.RESET
-                print("[reset] non-five-star monster; use in-game initialization")
-            else:
-                self.state.stop.before_reset = True
-                print("[result] non-five-star monster; stopped before unverified data reset")
-            self.state.endgame.inbox_claimed = False
-            self.state.endgame.light_dark_selected = False
-            self._reset_summon_search()
-            self.state.battle.needs_team_selection = False
-            self.state.battle.needs_support_selection = False
-            self.state.runtime.last_action_at = time.time()
+                return True
+
+            if star_count in (3, 4):
+                if config.AUTO_RESET_AFTER_NON_FIVE_STAR:
+                    self._confirm_summon_result(
+                        obs,
+                        "confirm verified {}-star summon result".format(star_count),
+                    )
+                    self._begin_game_reset()
+                    print(
+                        "[reset] verified {}-star monster; use in-game initialization".format(
+                            star_count
+                        )
+                    )
+                else:
+                    self.state.stop.before_reset = True
+                    print(
+                        "[result] verified {}-star monster; stopped before reset by config".format(
+                            star_count
+                        )
+                    )
+                return True
+
+            self.state.endgame.phase = EndgamePhase.WAIT_FEISHU_REPLY
+            self.state.endgame.reply_wait_started_at = time.time()
+            print(
+                "[result] summon star count is uncertain; keep result screen "
+                "and prohibit automatic initialization"
+            )
+            print("[feishu] waiting for direct reply: stop or initialize")
             return True
 
         return False

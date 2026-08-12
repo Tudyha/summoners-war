@@ -74,6 +74,19 @@ class VisualFrameTests(unittest.TestCase):
         self.assertIsNot(cached, fresh)
         self.assertEqual(2, len(capture_calls))
 
+    def test_1080x720_is_the_identity_coordinate_space(self):
+        self.assertEqual(1080, vision_core.config.REFERENCE_WIDTH)
+        self.assertEqual(720, vision_core.config.REFERENCE_HEIGHT)
+        self.assertEqual((701, 454), vision_core.scale_point((701, 454)))
+
+    def test_all_calibrated_points_fit_the_supported_display(self):
+        for name, point in vision_core.config.POINTS.items():
+            with self.subTest(name=name):
+                self.assertGreaterEqual(point[0], 0)
+                self.assertLessEqual(point[0], 1080)
+                self.assertGreaterEqual(point[1], 0)
+                self.assertLessEqual(point[1], 720)
+
 
 if __name__ == "__main__":
     unittest.main()

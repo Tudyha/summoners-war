@@ -88,7 +88,7 @@ def scale_point(point):
     )
 
 def display_scales(width=None, height=None):
-    """Return independent X/Y scales from the 1600x900 reference frame."""
+    """Return independent X/Y scales from the 1080x720 reference frame."""
     if width is None or height is None:
         width, height = display_size()
     return (

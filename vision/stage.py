@@ -260,12 +260,17 @@ def find_selected_team_members(observation):
         aspect = box_width / float(max(1, box_height))
         if not 0.72 <= aspect <= 1.35:
             continue
-        # The outer portrait frame is almost a filled rectangular contour.
-        # Internal artwork contours can have the same bounding size but only
-        # a small area, so exclude them before clustering duplicate borders.
-        if cv2.contourArea(contour) < box_width * box_height * 0.75:
+        contour_fill_ratio = cv2.contourArea(contour) / float(
+            max(1, box_width * box_height)
+        )
+        # Android-209 calibration:
+        # - real selected portrait: fill=0.003, std=58.9, edge=0.269
+        # - empty leader slot with text: fill>=0.962
+        # The portrait is found through an artwork/frame edge contour, while
+        # empty slots expose a nearly filled rectangular contour. Keep the
+        # low-fill contour and let the texture checks below reject plain slots.
+        if contour_fill_ratio >= 0.20:
             continue
-
         card_roi = gray[
             box_y + int(box_height * 0.10):box_y + int(box_height * 0.90),
             box_x + int(box_width * 0.10):box_x + int(box_width * 0.90),
@@ -297,7 +302,9 @@ def find_selected_team_members(observation):
     centers.sort(key=lambda point: (point[0], point[1]))
     return centers
 
-def find_highest_star_team_members(observation, limit=4):
+def find_highest_star_team_members(
+    observation, limit=4, require_disabled_start=True
+):
     """Return selectable monster cards ordered by descending star count.
 
     This preparation screen is self-drawn.  Card frames establish the dynamic
@@ -306,14 +313,24 @@ def find_highest_star_team_members(observation, limit=4):
     """
     # `结束战斗` was observed as `東战斗` on this exact screen, so it is not
     # stable enough to use as a required page anchor.
-    if not observation.contains_all("领队", "对战", "开始战"):
+    leader_visible = (
+        observation.contains("领队") or observation.contains("领袖")
+    )
+    if not (
+        leader_visible
+        and observation.contains("对战")
+        and observation.contains("开始战")
+    ):
         return []
 
     image = capture_cv()
     if image is None:
         return []
     height, width = image.shape[:2]
-    if not battle_start_is_disabled(observation, image):
+    if (
+        require_disabled_start
+        and not battle_start_is_disabled(observation, image)
+    ):
         return []
 
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)

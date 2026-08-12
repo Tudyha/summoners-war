@@ -167,6 +167,8 @@ def recognize_scene(observation):
         (Scene.BATTLE_RESULT, 0.90, ("失败", "停止")),
         (Scene.STAGE_LIST, 0.90, ("掉落信息", "难度")),
         (Scene.BATTLE_PREPARATION, 0.90, ("开始战斗", "结束战斗")),
+        (Scene.BATTLE_PREPARATION, 0.90, ("开始战斗", "对战")),
+        (Scene.BATTLE_PREPARATION, 0.90, ("开始战", "对战")),
         (Scene.INBOX, 0.88, ("收件箱", "领取")),
         (Scene.STARTUP, 0.92, ("Google登录", "Hive登录")),
         (Scene.STARTUP, 0.92, ("游戏使用条款",)),

@@ -1,8 +1,10 @@
 """Blocking overlay and generic confirmation flow."""
 
 from .. import config
+from ..core.run_state import RunMode
 from ..core.scene_recognizer import summon_result_match
 from ..vision.core import scale_point
+from ..vision.collaboration import find_minigame_entrance_icon
 from ..vision.overlay import find_top_right_close_button
 
 
@@ -105,8 +107,8 @@ class OverlayFlow(object):
         decline_revive = obs.matching(
             lambda row: row["text"] == "否"
             or (
-                scale_point((850, 0))[0] <= row["x"] <= scale_point((1250, 0))[0]
-                and scale_point((0, 500))[1] <= row["y"] <= scale_point((0, 650))[1]
+                scale_point((573, 0))[0] <= row["x"] <= scale_point((843, 0))[0]
+                and scale_point((0, 400))[1] <= row["y"] <= scale_point((0, 520))[1]
                 and len(row["text"]) <= 2
             )
         )
@@ -137,6 +139,17 @@ class OverlayFlow(object):
             return True
 
         if obs.contains_all("联动通行证", "活动期间"):
+            # The collaboration activity page itself carries both labels.
+            # Once the dice entrance is visible, ownership switches to the
+            # collaboration flow even if the normal story is still active.
+            if (
+                self.state.run_mode == RunMode.COLLABORATION
+                and (
+                    self.state.collaboration.started
+                    or find_minigame_entrance_icon() is not None
+                )
+            ):
+                return False
             self.actions.click_xy("event_close", "close event popup")
             return True
 
@@ -173,8 +186,8 @@ class OverlayFlow(object):
         if obs.contains("成长的第一步") and obs.contains("初级礼包"):
             popup_closes = obs.matching(
                 lambda row: row["text"] in ("X", "×")
-                and row["x"] >= scale_point((1300, 0))[0]
-                and row["y"] <= scale_point((0, 180))[1]
+                and row["x"] >= scale_point((877, 0))[0]
+                and row["y"] <= scale_point((0, 144))[1]
             )
             if len(popup_closes) == 1:
                 self.actions.click_row(
@@ -191,7 +204,7 @@ class OverlayFlow(object):
         return False
 
     def handle_confirm(self, obs):
-        for r in obs.matching(lambda row: row["text"] in ("确认", "是", "确队", "确趴")):
+        for r in obs.matching(lambda row: row["text"] in ("确认", "是", "确队", "确趴", "确议")):
             self.actions.click_row(r, "confirm dialog")
             return True
         return False
@@ -222,7 +235,7 @@ class OverlayFlow(object):
             for text in ("礼包", "限时", "商品", "购买", "免费")
             if obs.contains(text)
         )
-        if promotion_markers >= 2:
+        if promotion_markers >= 3:
             promotion_close = find_top_right_close_button()
             if promotion_close is not None:
                 self.actions.click_point(

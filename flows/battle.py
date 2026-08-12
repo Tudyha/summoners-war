@@ -47,9 +47,9 @@ class BattleFlow(object):
             return True
         upper_confirms = obs.matching(
             lambda row: row["text"].startswith("确")
-            and scale_point((0, 400))[1]
+            and scale_point((0, 320))[1]
             <= row["y"]
-            <= scale_point((0, 570))[1]
+            <= scale_point((0, 456))[1]
         )
         return self.support_popup_visible(obs) and bool(upper_confirms)
 
@@ -91,6 +91,34 @@ class BattleFlow(object):
         return support_monster_count
 
     def handle_battle_preparation(self, obs):
+        if obs.contains("至少要安排一个魔灵"):
+            confirms = obs.matching(
+                lambda row: row["text"].startswith("确")
+                and scale_point((0, 360))[1]
+                <= row["y"]
+                <= scale_point((0, 480))[1]
+            )
+            if len(confirms) == 1:
+                self.actions.click_row(
+                    confirms[0],
+                    "close at-least-one-monster warning",
+                )
+            else:
+                self.actions.click_xy(
+                    "at_least_one_monster_confirm",
+                    "close at-least-one-monster warning",
+                )
+            # Do not inspect formation slots through the blocking popup. Clear
+            # and rebuild only after a fresh preparation-page observation.
+            self.state.battle.needs_team_selection = True
+            self.state.battle.needs_support_selection = False
+            self.state.battle.checking_support_selection = False
+            self.state.battle.support_checked = False
+            self.state.battle.support_first_unavailable = False
+            self.state.battle.support_count_checked_for_preparation = False
+            self.state.friend.attempted_for_preparation = False
+            return True
+
         if self._leader_skill_warning_visible(obs):
             yes_rows = obs.exact("是")
             if len(yes_rows) == 1:
@@ -134,6 +162,48 @@ class BattleFlow(object):
             return True
 
         selected_team = find_selected_team_members(obs)
+        if self.state.battle.needs_team_selection:
+            preparation_visible = (
+                obs.contains("对战")
+                and obs.contains("开始战")
+                and not self.support_popup_visible(obs)
+            )
+            if not preparation_visible:
+                return False
+
+            if selected_team:
+                # Remove one verified slot per fresh frame so formation shifts
+                # cannot turn the remaining clicks into stale coordinates.
+                member = max(selected_team, key=lambda point: point[0])
+                self.actions.click_point(
+                    member,
+                    "clear selected team before rebuilding formation",
+                )
+                return True
+
+            team_members = find_highest_star_team_members(
+                obs,
+                3,
+                require_disabled_start=False,
+            )
+            if not team_members:
+                print(
+                    "[battle] team is empty but no ranked monster cards "
+                    "were detected for reselection"
+                )
+                return True
+            for member in team_members:
+                self.actions.click_point(
+                    member["point"],
+                    "reselect {}-star story team member".format(member["stars"]),
+                )
+                time.sleep(0.35)
+            self.state.battle.needs_team_selection = False
+            print("[battle] rebuilt story team with {} monsters".format(
+                len(team_members)
+            ))
+            return True
+
         preparing_support = (
             self.state.battle.needs_support_selection
             or self.state.battle.checking_support_selection
@@ -235,7 +305,7 @@ class BattleFlow(object):
             lambda row: (
                 "开始战斗" in row["text"] or "开始战" in row["text"]
             )
-            and row["x"] >= scale_point((1100, 0))[0]
+            and row["x"] >= scale_point((742, 0))[0]
         )
         if self.state.battle.needs_support_selection and len(start_battles) == 1:
             self.select_first_support_monster()
@@ -294,6 +364,7 @@ class BattleFlow(object):
                 "帕伊摩图火山",
                 "帕伊劇思火山",
                 "始伊度恩火山",
+                "伊摩恩火山"
             ]
             if any(obs.contains(map_name) for map_name in filter_maps):
                 self.state.battle.checking_support_selection = True

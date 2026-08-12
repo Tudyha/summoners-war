@@ -76,8 +76,64 @@ class NicknameState(object):
 class EndgamePhase(object):
     INACTIVE = "inactive"
     SUMMON = "summon"
+    WAIT_FEISHU_REPLY = "wait_feishu_reply"
     RESET = "reset"
     RESET_CONFIRM = "reset_confirm"
+
+
+class RunMode(object):
+    VOLCANO = "volcano"
+    COLLABORATION = "collaboration"
+
+
+class SummonScrollKind(object):
+    LIGHT_DARK = "light_dark"
+    COLLABORATION = "collaboration"
+
+
+class CollaborationPhase(object):
+    OPEN_EVENT = "open_event"
+    OPEN_MINIGAME = "open_minigame"
+    PLAY = "play"
+    CLAIM_ACHIEVEMENTS = "claim_achievements"
+    RETURN_HOME = "return_home"
+    COMPLETE = "complete"
+
+
+class CollaborationState(object):
+    def __init__(self):
+        self.reset()
+
+    def reset(self, allow_internal_resume=True):
+        self.phase = CollaborationPhase.OPEN_EVENT
+        self.achievement_count = 0
+        self.reward_claim_attempts = 0
+        self.run_count = 0
+        self.roll_count = 0
+        self.collection_checked_run = -1
+        self.in_run = False
+        self.skill_checked_run = -1
+        self.skill_step = "select"
+        self.maxed_skill_indices = set()
+        self.pending_skill_index = None
+        self.prepared_run = -1
+        self.prepare_step = "select_old"
+        self.replacement_slot_cursor = 0
+        self.replacement_item_cursor = 0
+        self.replacement_attempts = 0
+        self.shop_step = "select"
+        self.shop_completed = False
+        self.shop_visit_count = 0
+        self.shop_attempts = 0
+        self.started = False
+        # A fresh script may legitimately start inside the minigame. After an
+        # account reset, however, one or more stale frames from the old account
+        # can remain visible and must not immediately restore old ownership.
+        self.allow_internal_resume = allow_internal_resume
+
+    @property
+    def is_complete(self):
+        return self.phase == CollaborationPhase.COMPLETE
 
 
 class EndgameState(object):
@@ -85,6 +141,13 @@ class EndgameState(object):
         self.phase = EndgamePhase.INACTIVE
         self.inbox_claimed = False
         self.light_dark_selected = False
+        self.scroll_kind = SummonScrollKind.LIGHT_DARK
+        self.feishu_message_id = None
+        self.feishu_sent_at = 0
+        self.last_feishu_poll_at = 0
+        self.last_feishu_send_at = 0
+        self.reply_wait_started_at = 0
+        self.summon_was_five_star = False
         self.summon_started = False
         self.entering_summon_circle = False
         self.summon_search_step = 0
@@ -100,16 +163,19 @@ class StopState(object):
     def __init__(self):
         self.for_five_star = False
         self.before_reset = False
+        self.requested_by_operator = False
 
 
 class RunnerState(object):
     """The complete mutable state of one automation run."""
 
-    def __init__(self):
+    def __init__(self, run_mode=RunMode.VOLCANO):
+        self.run_mode = run_mode
         self.runtime = RuntimeState()
         self.friend = FriendState()
         self.battle = BattleState()
         self.world_map = WorldMapState()
         self.nickname = NicknameState()
         self.endgame = EndgameState()
+        self.collaboration = CollaborationState()
         self.stop = StopState()

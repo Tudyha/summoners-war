@@ -3,10 +3,11 @@
 from .core.behavior_router import HandlerBehavior, PriorityRouter
 from .core.engine import AutomationEngine
 from .core.overlay_recognizer import recognize_overlays
-from .core.run_state import RunnerState
+from .core.run_state import RunMode, RunnerState
 from .core.scene_recognizer import home_visible, recognize_scene
 from .core.screen_model import DecisionContext, ScreenSnapshot
 from .flows.battle import BattleFlow
+from .flows.collaboration import CollaborationFlow
 from .flows.endgame import EndgameFlow
 from .flows.friend import FriendFlow
 from .flows.home import HomeFlow
@@ -16,16 +17,17 @@ from .flows.startup import StartupFlow
 from .flows.tutorial import TutorialFlow
 from .flows.world_map import WorldMapFlow
 from .platform.actions import DeviceActions
-
-
 class Runner(object):
     """Own dependencies and route one immutable screen snapshot per tick."""
 
-    def __init__(self):
-        self.state = RunnerState()
+    def __init__(self, run_mode=RunMode.VOLCANO):
+        self.state = RunnerState(run_mode)
         self.actions = DeviceActions(self.state)
 
         self.endgame = EndgameFlow(self.state, self.actions)
+        self.collaboration = CollaborationFlow(
+            self.state, self.actions, self.endgame.enter
+        )
         self.friend = FriendFlow(self.state, self.actions)
         self.nickname = NicknameFlow(self.state, self.actions)
         self.overlay = OverlayFlow(self.state, self.actions)
@@ -70,11 +72,32 @@ class Runner(object):
             # A visible forced-guide arrow is more specific than the generic
             # home scene. It must act before HomeFlow's default Battle click.
             handler("tutorial_arrow", self.tutorial.handle_yellow_arrow),
+            handler("tutorial_overlay", self.tutorial.handle_tutorial_overlay),
+            handler(
+                "generic_tutorial_text",
+                self.tutorial.handle_generic_tap_texts,
+            ),
+            handler("dialogue", self.tutorial.handle_dialogue),
+            handler(
+                "collaboration",
+                self.collaboration.handle,
+                enabled=lambda context: (
+                    self.state.run_mode == RunMode.COLLABORATION
+                    and not self.state.endgame.is_active
+                    and (
+                        self.state.collaboration.started
+                        or self.collaboration.entrance_visible(context.observation)
+                    )
+                ),
+                blocks_when_idle=True,
+            ),
             handler(
                 "home",
                 self.home.handle_home_ownership,
                 enabled=lambda context: (
                     not self.state.endgame.is_active
+                    and (self.state.run_mode == RunMode.VOLCANO
+                         or not self.state.collaboration.started)
                     and home_visible(context.observation)
                 ),
                 blocks_when_idle=True,
@@ -87,13 +110,12 @@ class Runner(object):
                 ),
                 blocks_when_idle=True,
             ),
-            handler("world_map", self.world_map.handle_world_map),
-            handler("tutorial_overlay", self.tutorial.handle_tutorial_overlay),
             handler(
-                "generic_tutorial_text",
-                self.tutorial.handle_generic_tap_texts,
+                "world_map",
+                self.world_map.handle_world_map,
+                enabled=lambda context: (self.state.run_mode == RunMode.VOLCANO
+                                         or not self.state.collaboration.started),
             ),
-            handler("dialogue", self.tutorial.handle_dialogue),
             handler("startup", self.startup.handle),
             handler(
                 "sparse_support_friend_request",
@@ -110,6 +132,8 @@ class Runner(object):
         ))
 
     def tick(self, context):
+        if self.state.run_mode == RunMode.COLLABORATION:
+            self.collaboration.resume_if_internal(context.observation)
         return self.router.tick(context)
 
     def handle_observation(self, observation):

@@ -34,6 +34,9 @@ class TutorialFlow(object):
             "保罗帕遗址",
             "保罗帕市贵址",
             "保罗帕库鄭遗址",
+            "保罗帕库遗址",
+            "保罗帕库遗址",
+            "保罗帕所遗址",
         )
         if any(obs.contains(name) for name in excluded_maps):
             return False
@@ -44,6 +47,16 @@ class TutorialFlow(object):
         return True
 
     def handle_tutorial_overlay(self, obs):
+        # The collaboration item-replacement modal dims the board and contains
+        # a wide gold/brown item-description frame, so it satisfies the generic
+        # visual tutorial shape.  Its title/prompt prove that this is a real
+        # business screen; leave it to CollaborationFlow instead of clicking
+        # the description panel forever.
+        if (
+            obs.contains("请选择要更换的道具")
+            or obs.contains_all("游戏准备", "初始道具")
+        ):
+            return False
         overlay_target = find_tutorial_text_overlay()
         if overlay_target is None:
             return False
