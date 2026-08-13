@@ -91,6 +91,36 @@ class BattleFlow(object):
         return support_monster_count
 
     def handle_battle_preparation(self, obs):
+        formation_full = (
+            obs.contains("栏位中魔灵已满")
+            or obs.contains_all("栏位", "魔灵", "已满")
+        )
+        if formation_full:
+            confirms = obs.matching(
+                lambda row: row["text"].startswith("确")
+                and scale_point((0, 360))[1]
+                <= row["y"]
+                <= scale_point((0, 480))[1]
+            )
+            if len(confirms) == 1:
+                self.actions.click_row(
+                    confirms[0],
+                    "close full formation before support selection",
+                )
+            else:
+                self.actions.click_xy(
+                    "used_support_warning_confirm",
+                    "close full formation before support selection",
+                )
+            # Keep the failed-battle support intent. On the fresh preparation
+            # frame the occupied-team detector will remove the fourth member
+            # before opening the support list again.
+            self.state.battle.needs_support_selection = True
+            self.state.battle.checking_support_selection = False
+            self.state.battle.support_checked = False
+            self.state.battle.support_count_checked_for_preparation = False
+            return True
+
         if obs.contains("至少要安排一个魔灵"):
             confirms = obs.matching(
                 lambda row: row["text"].startswith("确")
@@ -375,17 +405,29 @@ class BattleFlow(object):
                 self.state.battle.support_checked = True
             return True
 
+        # A battle-preparation scene must never fall through merely because a
+        # transient OCR split prevented the stricter unique-row match above.
+        # After support handling, use the calibrated button only when the page
+        # still independently exposes both preparation anchors.
         if (
-            len(start_battles) == 1
-            and self.state.battle.support_checked
+            self.state.battle.support_checked
+            and obs.contains("对战")
+            and obs.contains("开始战")
             and not battle_start_is_disabled(obs)
         ):
             self.state.battle.needs_support_selection = False
             self.state.battle.checking_support_selection = False
             self.state.battle.support_count_checked_for_preparation = False
             self.state.friend.attempted_for_preparation = False
-            self.actions.click_row(start_battles[0], "start next-stage battle")
+            if len(start_battles) == 1:
+                self.actions.click_row(start_battles[0], "start next-stage battle")
+            else:
+                self.actions.click_point(
+                    scale_point((940, 530)),
+                    "start next-stage battle from verified preparation scene",
+                )
             return True
+
         if self.support_popup_visible(obs):
             self._handle_counted_support_list(obs)
             return True

@@ -122,7 +122,9 @@ POINTS = {
     # Frieren collaboration activity and dice minigame, verified on Android-125.
     "collaboration_event": (1030, 348),
     "collaboration_minigame": (884, 558),
-    "collaboration_collection": (234, 654),
+    # Updated minigame footer (2026-08): verified on Android-209. The flow
+    # prefers the unique OCR label and uses this only when OCR misses it.
+    "collaboration_collection": (174, 694),
     "collaboration_collection_close": (947, 92),
     "collaboration_reward_claim": (805, 551),
     "collaboration_minigame_close": (1033, 56),
@@ -130,7 +132,9 @@ POINTS = {
     "collaboration_game_start": (669, 594),
     "collaboration_roll": (968, 592),
     "collaboration_result_continue": (540, 400),
-    "collaboration_skill": (137, 654),
+    # Updated minigame footer (2026-08): verified on Android-209. The flow
+    # prefers the unique OCR label and uses this only when OCR misses it.
+    "collaboration_skill": (78, 695),
     "collaboration_skill_health": (603, 295),
     "collaboration_skill_upgrade": (740, 549),
     "collaboration_shop_confirm": (540, 622),

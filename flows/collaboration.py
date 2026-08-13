@@ -535,15 +535,29 @@ class CollaborationFlow(object):
                 state.shop_completed = False
                 state.shop_attempts = 0
             if state.collection_checked_run < state.run_count:
-                self.actions.click_xy(
-                    "collaboration_collection",
-                    "check collaboration achievement collection",
-                )
+                collection_rows = obs.exact("收集")
+                if len(collection_rows) == 1:
+                    self.actions.click_row(
+                        collection_rows[0],
+                        "check collaboration achievement collection",
+                    )
+                else:
+                    self.actions.click_xy(
+                        "collaboration_collection",
+                        "check collaboration achievement collection",
+                    )
             elif state.skill_checked_run < state.run_count:
-                self.actions.click_xy(
-                    "collaboration_skill",
-                    "open collaboration skill upgrades",
-                )
+                skill_rows = obs.exact("技能")
+                if len(skill_rows) == 1:
+                    self.actions.click_row(
+                        skill_rows[0],
+                        "open collaboration skill upgrades",
+                    )
+                else:
+                    self.actions.click_xy(
+                        "collaboration_skill",
+                        "open collaboration skill upgrades",
+                    )
             else:
                 self.actions.click_xy(
                     "collaboration_game_prepare",

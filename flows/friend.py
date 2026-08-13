@@ -60,6 +60,7 @@ class FriendFlow(object):
                         and (
                             "已发送" in row["text"]
                             or "发送过" in row["text"]
+                            or "已发迭" in row["text"]
                         )
                     )
                 )
@@ -275,12 +276,10 @@ class FriendFlow(object):
         min_chat_y = scale_point((0, 104))[1]
         max_chat_y = scale_point((0, 640))[1]
         for row in obs.rows:
-            text = row["text"]
-            open_index = text.find("[")
-            close_index = text.find("]", open_index + 1)
             # A real chat sender starts at the far-left name column. Ignore
             # brackets later in message bodies and badly merged OCR rows.
-            if open_index < 0 or open_index > 2 or close_index <= open_index + 1:
+            player_name = self._chat_player_name(row)
+            if not player_name or player_name == "通知":
                 continue
             raw = row.get("raw")
             if isinstance(raw, dict):
@@ -296,14 +295,9 @@ class FriendFlow(object):
                 continue
             if bottom < min_chat_y or top > max_chat_y:
                 continue
-            if "通知" in text:
-                continue
-            if (
-                "开启了" in text
-                or "秘密地下城" in text
-                or "召唤出" in text
-            ):
-                continue
+            # Do not filter on the message body. ML Kit frequently merges a
+            # valid player row with a following secret-dungeon/summon notice;
+            # those senders are valid friend-request targets anyway.
             candidates.append(row)
         return candidates
 
@@ -337,10 +331,30 @@ class FriendFlow(object):
     def _chat_player_name(self, row):
         """Return the bracketed sender name used to avoid duplicate requests."""
         text = row["text"]
-        open_index = text.find("[")
-        close_index = text.find("]", open_index + 1)
-        if open_index < 0 or close_index <= open_index + 1:
+        open_positions = [
+            position for position in (
+                text.find("["),
+                text.find("【"),
+                text.find("("),
+            )
+            if position >= 0
+        ]
+        if not open_positions:
             return ""
+        open_index = min(open_positions)
+        if open_index > 2:
+            return ""
+        close_positions = [
+            position for position in (
+                text.find("]", open_index + 1),
+                text.find("】", open_index + 1),
+                text.find(")", open_index + 1),
+            )
+            if position > open_index + 1
+        ]
+        if not close_positions:
+            return ""
+        close_index = min(close_positions)
         return text[open_index + 1:close_index].strip()
 
     def _return_to_open_chat(self):
@@ -492,16 +506,27 @@ class FriendFlow(object):
             )
         )
         begin_visual_frame()
-        chat_point = find_chat_open()
-        if chat_point is None:
-            print("[friend] movable chat bubble not found")
-            return True
-        self.actions.click_point(
-            chat_point,
-            "open movable chat bubble for {} friend requests".format(
-                config.FRIEND_REQUESTS_PER_ROUND
-            ),
+        # Since v9.2.9 the battle-preparation chat entry is a bordered `C`
+        # badge instead of the old three-dot bubble. This method has already
+        # uniquely proved the right-side Start Battle anchor, so the top-left
+        # single-character OCR match is safely bound to this scene.
+        chat_rows = obs.matching(
+            lambda row: (
+                row["text"].lstrip().startswith("C")
+                and row["y"] <= scale_point((0, 70))[1]
+            )
         )
+        reason = "open chat for {} friend requests".format(
+            config.FRIEND_REQUESTS_PER_ROUND
+        )
+        if len(chat_rows) == 1:
+            self.actions.click_row(chat_rows[0], reason)
+        else:
+            chat_point = find_chat_open()
+            if chat_point is None:
+                print("[friend] chat entry not found in new or legacy style")
+                return True
+            self.actions.click_point(chat_point, reason)
         chat_obs = self._wait_observation(self._chat_overlay_visible)
         if not self._chat_overlay_visible(chat_obs):
             self.actions.click_xy("chat_close", "close chat after missing chat overlay")

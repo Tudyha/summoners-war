@@ -231,6 +231,28 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("COLLABORATION_SHOP_UPGRADES", source)
         self.assertIn("state.in_run = True", source)
 
+    def test_collection_entry_prefers_ocr_after_footer_layout_update(self):
+        source = (ROOT / "flows/collaboration.py").read_text(encoding="utf-8")
+        home_handler = source.split(
+            "if self._minigame_home_visible(obs):", 2
+        )[-1].split("entrance_icon =", 1)[0]
+        config_source = (ROOT / "config.py").read_text(encoding="utf-8")
+
+        self.assertIn('collection_rows = obs.exact("收集")', home_handler)
+        self.assertIn("self.actions.click_row(", home_handler)
+        self.assertIn('"collaboration_collection": (174, 694)', config_source)
+
+    def test_skill_entry_prefers_ocr_after_footer_layout_update(self):
+        source = (ROOT / "flows/collaboration.py").read_text(encoding="utf-8")
+        home_handler = source.split(
+            "if self._minigame_home_visible(obs):", 2
+        )[-1].split("entrance_icon =", 1)[0]
+        config_source = (ROOT / "config.py").read_text(encoding="utf-8")
+
+        self.assertIn('skill_rows = obs.exact("技能")', home_handler)
+        self.assertIn("self.actions.click_row(", home_handler)
+        self.assertIn('"collaboration_skill": (78, 695)', config_source)
+
     def test_collaboration_can_resume_from_an_internal_minigame_screen(self):
         source = (ROOT / "runner.py").read_text(encoding="utf-8")
 
@@ -365,6 +387,44 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("FRIEND_UI_POLL_SECONDS = 0.2", config_source)
         self.assertIn("FRIEND_UI_TIMEOUT_SECONDS = 2.0", config_source)
 
+    def test_friend_flow_supports_new_c_chat_entry_and_legacy_bubble(self):
+        friend_source = (ROOT / "flows/friend.py").read_text(encoding="utf-8")
+        round_source = friend_source.split(
+            "    def try_request_friend_for_sparse_support", 1
+        )[1].split("\n    def try_request_friend_from_chat", 1)[0]
+
+        self.assertIn('row["text"].lstrip().startswith("C")', round_source)
+        self.assertIn("self.actions.click_row(chat_rows[0]", round_source)
+        self.assertEqual(1, round_source.count("find_chat_open()"))
+        self.assertIn("chat entry not found in new or legacy style", round_source)
+
+    def test_chat_candidates_survive_merged_message_body(self):
+        source = (ROOT / "flows/friend.py").read_text(encoding="utf-8")
+        candidate_source = source.split(
+            "    def _chat_player_candidates", 1
+        )[1].split("\n    def _chat_player_click_point", 1)[0]
+        name_source = source.split(
+            "    def _chat_player_name", 1
+        )[1].split("\n    def _return_to_open_chat", 1)[0]
+
+        self.assertNotIn('"开启了" in text', candidate_source)
+        self.assertNotIn('"秘密地下城" in text', candidate_source)
+        self.assertNotIn('"召唤出" in text', candidate_source)
+        self.assertIn('player_name == "通知"', candidate_source)
+        self.assertIn('text.find("【")', name_source)
+        self.assertIn('text.find("(")', name_source)
+
+    def test_battle_preparation_progress_does_not_depend_on_map_title_ocr(self):
+        source = (ROOT / "flows/battle.py").read_text(encoding="utf-8")
+
+        self.assertNotIn("filter_maps = [", source)
+        self.assertIn('obs.contains("对战")', source)
+        self.assertIn('obs.contains("开始战")', source)
+        self.assertIn(
+            '"start next-stage battle from verified preparation scene"',
+            source,
+        )
+
     def test_failed_battle_uses_sparse_available_support(self):
         source = (ROOT / "flows/battle.py").read_text(encoding="utf-8")
         policy_source = source.split(
@@ -406,13 +466,29 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("card_roi.std()", selected_detector)
         self.assertIn("edge_density < 0.08", selected_detector)
         self.assertNotIn("box_width * box_height * 0.75", selected_detector)
-        self.assertIn("contour_fill_ratio >= 0.20", selected_detector)
+        self.assertNotIn("contour_fill_ratio >= 0.20", selected_detector)
+        self.assertIn('leader_placeholders = observation.exact("领队")', selected_detector)
+        self.assertIn('row["x"]', selected_detector)
+        self.assertIn('row["y"]', selected_detector)
+        self.assertIn("int(width * 0.025)", selected_detector)
+        self.assertIn("int(height * 0.035)", selected_detector)
 
         ranked_detector = detector_source.split(
             "def find_highest_star_team_members", 1
         )[1]
         self.assertIn("require_disabled_start=True", ranked_detector)
         self.assertIn('observation.contains("领袖")', ranked_detector)
+
+    def test_full_formation_popup_recovers_without_losing_support_intent(self):
+        source = (ROOT / "flows/battle.py").read_text(encoding="utf-8")
+        handler = source.split(
+            "    def handle_battle_preparation", 1
+        )[1].split('        if obs.contains("至少要安排一个魔灵"):', 1)[0]
+
+        self.assertIn('obs.contains("栏位中魔灵已满")', handler)
+        self.assertIn("close full formation before support selection", handler)
+        self.assertIn("self.state.battle.needs_support_selection = True", handler)
+        self.assertIn("self.state.battle.checking_support_selection = False", handler)
 
     def test_empty_team_warning_rebuilds_the_formation(self):
         source = (ROOT / "flows/battle.py").read_text(encoding="utf-8")

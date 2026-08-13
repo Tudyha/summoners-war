@@ -241,6 +241,7 @@ def find_selected_team_members(observation):
     if image is None:
         return []
     height, width = image.shape[:2]
+    leader_placeholders = observation.exact("领队")
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 50, 130)
     contours = cv2.findContours(
@@ -260,17 +261,6 @@ def find_selected_team_members(observation):
         aspect = box_width / float(max(1, box_height))
         if not 0.72 <= aspect <= 1.35:
             continue
-        contour_fill_ratio = cv2.contourArea(contour) / float(
-            max(1, box_width * box_height)
-        )
-        # Android-209 calibration:
-        # - real selected portrait: fill=0.003, std=58.9, edge=0.269
-        # - empty leader slot with text: fill>=0.962
-        # The portrait is found through an artwork/frame edge contour, while
-        # empty slots expose a nearly filled rectangular contour. Keep the
-        # low-fill contour and let the texture checks below reject plain slots.
-        if contour_fill_ratio >= 0.20:
-            continue
         card_roi = gray[
             box_y + int(box_height * 0.10):box_y + int(box_height * 0.90),
             box_x + int(box_width * 0.10):box_x + int(box_width * 0.90),
@@ -283,7 +273,11 @@ def find_selected_team_members(observation):
         )
         # Empty formation slots keep the same outer frame, but their gray
         # silhouette is nearly flat. On Android-125 the verified empty slot is
-        # std=6.2/edge=0.005, versus std>=51/edge>=0.18 for real portraits.
+        # std=6.2/edge=0.005, versus std>=51/edge>=0.17 for real portraits.
+        # Do not require a low-fill inner contour: the fourth occupied card on
+        # the updated preparation screen exposed only its high-fill outer
+        # frame (fill=0.970, std=60.8, edge=0.222). The texture checks below
+        # already separate that portrait from a genuinely empty slot.
         if float(card_roi.std()) < 18.0 or edge_density < 0.08:
             continue
 
@@ -291,9 +285,28 @@ def find_selected_team_members(observation):
             int(box_x + box_width / 2.0),
             int(box_y + box_height / 2.0),
         )
+        # An empty leader slot contains a textured `领队` label. After the
+        # contour relaxation needed for the updated fourth occupied card, that
+        # text can otherwise look like a portrait (Android-125: std=44.6,
+        # edge=0.110) and be clicked forever while rebuilding an empty team.
+        # An occupied leader card no longer exposes this label, so bind the
+        # exclusion to the current OCR row instead of weakening portrait
+        # detection again.
         if any(
-            abs(center[0] - old[0]) <= int(width * 0.008)
-            and abs(center[1] - old[1]) <= int(height * 0.012)
+            abs(center[0] - row["x"]) <= int(width * 0.07)
+            and abs(center[1] - row["y"]) <= int(height * 0.09)
+            for row in leader_placeholders
+        ):
+            continue
+        if any(
+            # A selected portrait exposes several nested artwork/frame
+            # contours. During the selection animation their centres can
+            # differ by more than the old ~9 px tolerance, making three real
+            # members look like four and causing the rightmost real member to
+            # be removed before support selection. Formation slots are at
+            # least ~60 px apart, so a 25 px slot-level cluster is safe.
+            abs(center[0] - old[0]) <= int(width * 0.025)
+            and abs(center[1] - old[1]) <= int(height * 0.035)
             for old in centers
         ):
             continue
