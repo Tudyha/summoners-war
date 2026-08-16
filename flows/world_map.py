@@ -19,6 +19,15 @@ class WorldMapFlow(object):
         return world_map_match(obs) is not None
 
     def handle_world_map(self, obs):
+        # `press_back` returns from the world map asynchronously.  The next
+        # OCR call can capture the old map frame and finish only after the
+        # home island is already visible.  Never let that stale observation
+        # dispatch another map swipe: it would drag the home-island camera.
+        # HomeFlow clears this intent only after it has positively recognized
+        # and taken ownership of the home screen.
+        if self.state.world_map.returning_home_for_task:
+            return True
+
         if not self._world_map_visible(obs):
             return False
 

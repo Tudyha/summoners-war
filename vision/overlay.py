@@ -1,8 +1,60 @@
 """Visual detectors for blocking overlay controls."""
 
+import math
+
 import cv2
 import numpy as np
 from .core import capture_frame_image as capture_cv
+
+
+def _find_edge_attached_far_right_x(image):
+    """Find a close X fused into a full-width promotion panel's right edge."""
+
+    height, width = image.shape[:2]
+    scale = min(width / 1080.0, height / 720.0)
+    left = int(width * 0.945)
+    right = width
+    top = int(height * 0.10)
+    bottom = int(height * 0.23)
+    gray = cv2.cvtColor(image[top:bottom, left:right], cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 20, 40)
+    lines = cv2.HoughLinesP(
+        edges,
+        1,
+        np.pi / 180.0,
+        threshold=max(4, int(round(5 * scale))),
+        minLineLength=max(5, int(round(6 * scale))),
+        maxLineGap=max(2, int(round(3 * scale))),
+    )
+    if lines is None:
+        return None
+
+    rising = []
+    falling = []
+    for x1, y1, x2, y2 in lines[:, 0]:
+        angle = math.degrees(math.atan2(y2 - y1, x2 - x1))
+        midpoint = (
+            left + (x1 + x2) / 2.0,
+            top + (y1 + y2) / 2.0,
+        )
+        if 30.0 <= angle <= 65.0:
+            rising.append(midpoint)
+        elif -65.0 <= angle <= -30.0:
+            falling.append(midpoint)
+
+    max_pair_distance = 26.0 * scale
+    if not any(
+        math.hypot(up[0] - down[0], up[1] - down[1])
+        <= max_pair_distance
+        for up in rising
+        for down in falling
+    ):
+        return None
+
+    # The close control is self-drawn and exposes no accessibility node. The
+    # paired diagonals establish its button region; return its verified centre.
+    return int(width * 0.972), int(height * 0.167)
+
 
 def find_top_right_close_button():
     """Find a neutral bright X used to close self-drawn promotion overlays.
@@ -76,9 +128,22 @@ def find_top_right_close_button():
         center_y = top + y + box_height // 2
         candidates.append((center_x, score, center_y))
 
-    if not candidates:
-        return None
     # Promotion close controls sit at the outer edge of their panel. Ranking
     # by X after shape validation rejects crossed highlights inside artwork.
     candidates.sort(reverse=True)
+    # Prefer a complete, isolated X near the screen's right edge.  The
+    # edge-attached detector below intentionally uses looser Hough geometry
+    # for full-width panels, so running it first can mistake background art
+    # for that special case and return its fixed edge coordinate.
+    outer_edge = int(width * 0.85)
+    outer_candidates = [candidate for candidate in candidates if candidate[0] >= outer_edge]
+    if outer_candidates:
+        return outer_candidates[0][0], outer_candidates[0][2]
+
+    edge_attached_close = _find_edge_attached_far_right_x(image)
+    if edge_attached_close is not None:
+        return edge_attached_close
+
+    if not candidates:
+        return None
     return candidates[0][0], candidates[0][2]

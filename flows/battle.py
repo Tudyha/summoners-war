@@ -342,11 +342,29 @@ class BattleFlow(object):
             return True
 
         if (
+            self.state.battle.checking_support_selection
+            and obs.contains("对战")
+            and obs.contains("开始战")
+            and not self.support_popup_visible(obs)
+        ):
+            # Opening the self-drawn support tab can be lost during a loading
+            # or formation animation. `checking_support_selection` used to
+            # suppress both another open attempt and battle start, leaving a
+            # correctly recognized preparation scene with no handler forever.
+            self.actions.click_xy(
+                "support_tab",
+                "retry opening support list after missed transition",
+            )
+            return True
+
+        if (
             not self.state.battle.needs_support_selection
             and not self.state.battle.checking_support_selection
             and not self.state.battle.support_checked
             and len(start_battles) == 1
         ):
+            # Preserve limited support uses for the later story maps where
+            # they are needed to clear progression.
             filter_maps = [
                 "拉古恩雪山",
                 "拉古息雪",
@@ -394,12 +412,15 @@ class BattleFlow(object):
                 "帕伊摩图火山",
                 "帕伊劇思火山",
                 "始伊度恩火山",
-                "伊摩恩火山"
+                "伊摩恩火山",
             ]
             if any(obs.contains(map_name) for map_name in filter_maps):
                 self.state.battle.checking_support_selection = True
                 self.state.battle.support_first_unavailable = False
-                self.actions.click_xy("support_tab", "open support list to count selectable monsters")
+                self.actions.click_xy(
+                    "support_tab",
+                    "open support list to count selectable monsters",
+                )
             else:
                 print("[observe] no support_tab: {}".format(obs.compact_text()))
                 self.state.battle.support_checked = True

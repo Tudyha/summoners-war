@@ -96,6 +96,12 @@ class CollaborationFlow(object):
         )
 
     def _minigame_home_visible(self, obs):
+        # The collaboration activity landing page contains instructional text
+        # saying to play the `召唤骰子` minigame. That sentence is not the
+        # minigame home's title; treating it as one clicks the home footer's
+        # Collection coordinate on the landing-page gift chest instead.
+        if self._event_page_visible(obs):
+            return False
         return (
             obs.contains("召唤骰子")
             or obs.contains_all("最高记录", "游戏准备")
@@ -444,6 +450,19 @@ class CollaborationFlow(object):
             return False
         if state.phase == CollaborationPhase.RETURN_HOME:
             return self._return_home(obs)
+
+        gift_claims = obs.exact("收取")
+        if (
+            obs.contains("礼袋奖励")
+            and obs.contains("联动礼盒")
+            and len(gift_claims) == 1
+        ):
+            state.started = True
+            self.actions.click_row(
+                gift_claims[0],
+                "claim collaboration gift-box reward",
+            )
+            return True
 
         activity_guide = self._activity_guide_row(obs)
         if activity_guide is not None:

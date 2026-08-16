@@ -70,6 +70,35 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn('revive_prompt = obs.contains_all("失败", "是否现在复活")', source)
         self.assertIn('"battle_revive_decline"', source)
 
+    def test_accidental_cairos_selector_returns_to_story_map(self):
+        source = (ROOT / "flows/overlay.py").read_text(encoding="utf-8-sig")
+        handler = source.split(
+            "# Story progression never enters Cairos Dungeon", 1
+        )[1].split("# This is a known global modal", 1)[0]
+
+        self.assertIn('obs.contains("卡伊洛斯地下城")', handler)
+        self.assertIn('obs.contains("地下1层")', handler)
+        self.assertIn('obs.contains("准备完成")', handler)
+        self.assertIn('obs.contains("攻略信息")', handler)
+        self.assertIn('obs.contains("掉落信息")', handler)
+        self.assertNotIn('obs.contains("战斗")', handler)
+        self.assertIn("leave accidentally opened Cairos Dungeon selector", handler)
+        self.assertNotIn('click_row', handler)
+
+    def test_collaboration_gift_modal_preempts_flow_enablement(self):
+        source = (ROOT / "flows/overlay.py").read_text(encoding="utf-8-sig")
+        handler = source.split(
+            "    def handle_global_overlays", 1
+        )[1].split("# Story progression never enters", 1)[0]
+
+        self.assertIn('obs.exact("收取")', handler)
+        self.assertIn('obs.contains("礼袋奖励")', handler)
+        self.assertIn('obs.contains("联动礼盒")', handler)
+        self.assertIn(
+            "claim collaboration gift-box reward before flow ownership",
+            handler,
+        )
+
     def _tree(self, name):
         return ast.parse((ROOT / name).read_text(encoding="utf-8-sig"))
 
@@ -242,6 +271,27 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("self.actions.click_row(", home_handler)
         self.assertIn('"collaboration_collection": (174, 694)', config_source)
 
+    def test_event_landing_instruction_is_not_minigame_home(self):
+        source = (ROOT / "flows/collaboration.py").read_text(encoding="utf-8")
+        detector = source.split(
+            "    def _minigame_home_visible", 1
+        )[1].split("\n    def _event_page_visible", 1)[0]
+
+        self.assertIn("if self._event_page_visible(obs):", detector)
+        self.assertIn("return False", detector)
+        self.assertIn('obs.contains("召唤骰子")', detector)
+
+    def test_collaboration_gift_box_reward_is_claimed(self):
+        source = (ROOT / "flows/collaboration.py").read_text(encoding="utf-8")
+        handler = source.split(
+            "    def handle(self, obs):", 1
+        )[1].split("activity_guide =", 1)[0]
+
+        self.assertIn('gift_claims = obs.exact("收取")', handler)
+        self.assertIn('obs.contains("礼袋奖励")', handler)
+        self.assertIn('obs.contains("联动礼盒")', handler)
+        self.assertIn("claim collaboration gift-box reward", handler)
+
     def test_skill_entry_prefers_ocr_after_footer_layout_update(self):
         source = (ROOT / "flows/collaboration.py").read_text(encoding="utf-8")
         home_handler = source.split(
@@ -337,6 +387,18 @@ class ArchitectureTests(unittest.TestCase):
         self.assertNotIn("contains_all", return_branch)
         self.assertIn('click_xy("home_quest"', return_branch)
 
+    def test_world_map_return_intent_blocks_stale_map_swipe(self):
+        source = (ROOT / "flows/world_map.py").read_text(encoding="utf-8")
+        handler = source.split("    def handle_world_map(self, obs):", 1)[1]
+        return_guard = handler.index(
+            "if self.state.world_map.returning_home_for_task:"
+        )
+        visibility_check = handler.index("if not self._world_map_visible(obs):")
+        swipe = handler.index('"world_map_swipe_right"')
+
+        self.assertLess(return_guard, visibility_check)
+        self.assertLess(return_guard, swipe)
+
     def test_normal_and_failed_support_checks_share_one_policy(self):
         source = (ROOT / "flows/battle.py").read_text(encoding="utf-8")
         self.assertIn("def _handle_counted_support_list", source)
@@ -414,16 +476,32 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn('text.find("【")', name_source)
         self.assertIn('text.find("(")', name_source)
 
-    def test_battle_preparation_progress_does_not_depend_on_map_title_ocr(self):
+    def test_support_usage_is_reserved_for_late_story_maps(self):
         source = (ROOT / "flows/battle.py").read_text(encoding="utf-8")
 
-        self.assertNotIn("filter_maps = [", source)
-        self.assertIn('obs.contains("对战")', source)
-        self.assertIn('obs.contains("开始战")', source)
+        self.assertIn("filter_maps = [", source)
+        self.assertIn('"拉古恩雪山"', source)
+        self.assertIn('"夏依德尼遗址"', source)
+        self.assertIn('"帕伊摩恩"', source)
+        self.assertIn(
+            "if any(obs.contains(map_name) for map_name in filter_maps):",
+            source,
+        )
         self.assertIn(
             '"start next-stage battle from verified preparation scene"',
             source,
         )
+
+    def test_missed_support_transition_retries_from_preparation(self):
+        source = (ROOT / "flows/battle.py").read_text(encoding="utf-8")
+        retry_branch = source.split(
+            "retry opening support list after missed transition", 1
+        )[0].rsplit("if (", 1)[1]
+
+        self.assertIn("checking_support_selection", retry_branch)
+        self.assertIn('obs.contains("对战")', retry_branch)
+        self.assertIn('obs.contains("开始战")', retry_branch)
+        self.assertIn("not self.support_popup_visible(obs)", retry_branch)
 
     def test_failed_battle_uses_sparse_available_support(self):
         source = (ROOT / "flows/battle.py").read_text(encoding="utf-8")
@@ -505,10 +583,49 @@ class ArchitectureTests(unittest.TestCase):
 
     def test_generic_promotion_x_accepts_dim_neutral_strokes(self):
         source = (ROOT / "vision/overlay.py").read_text(encoding="utf-8")
+        flow_source = (ROOT / "flows/overlay.py").read_text(encoding="utf-8")
+        config_source = (ROOT / "config.py").read_text(encoding="utf-8")
+        self.assertIn("def _find_edge_attached_far_right_x", source)
+        self.assertIn("cv2.HoughLinesP", source)
+        self.assertIn("30.0 <= angle <= 65.0", source)
+        self.assertIn("-65.0 <= angle <= -30.0", source)
+        self.assertIn("return int(width * 0.972), int(height * 0.167)", source)
+        self.assertIn("outer_edge = int(width * 0.85)", source)
+        self.assertIn("if outer_candidates:", source)
+        self.assertLess(
+            source.index("bright = cv2.inRange"),
+            source.index("edge_attached_close ="),
+        )
         self.assertIn("np.array([0, 0, 165]", source)
         self.assertIn("np.array([179, 100, 255]", source)
         self.assertIn("template_coverage < 0.70", source)
         self.assertIn("component_coverage < 0.28", source)
+        self.assertNotIn("monthly_offer_markers", flow_source)
+        self.assertNotIn("monthly_special_offer_close", config_source)
+
+    def test_purchase_close_confirmation_preempts_covered_promotion(self):
+        source = (ROOT / "flows/overlay.py").read_text(encoding="utf-8")
+        handler = source.split("    def handle_global_overlays", 1)[1]
+
+        self.assertLess(
+            handler.index('obs.contains("是否关闭购买窗口")'),
+            handler.index("promotion_markers = sum("),
+        )
+        self.assertIn('close_confirms = obs.exact("是")', handler)
+        self.assertIn("confirm closing limited purchase popup", handler)
+
+    def test_login_reward_overlay_uses_anchored_visual_close(self):
+        source = (ROOT / "flows/overlay.py").read_text(encoding="utf-8")
+        handler = source.split("    def handle_global_overlays", 1)[1]
+
+        self.assertIn('obs.contains("签到活动")', handler)
+        self.assertIn(
+            'obs.contains_all(\n            "每天登录", "领取奖励"',
+            handler,
+        )
+        self.assertNotIn('obs.contains("签到礼物")', handler)
+        self.assertIn("login_reward_close = find_top_right_close_button()", handler)
+        self.assertIn("close login reward activity overlay by visual X", handler)
 
     def test_collaboration_scroll_detector_never_scans_between_rows(self):
         source = (ROOT / "vision/summon.py").read_text(encoding="utf-8")

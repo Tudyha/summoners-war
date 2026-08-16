@@ -59,20 +59,6 @@ class OverlayFlow(object):
         #     )
         #     return True
 
-        if obs.contains("是否关闭购买窗口"):
-            close_confirms = obs.exact("是")
-            if len(close_confirms) == 1:
-                self.actions.click_row(
-                    close_confirms[0],
-                    "confirm closing limited purchase popup",
-                )
-            else:
-                self.actions.click_xy(
-                    "limited_purchase_close_confirm",
-                    "confirm closing limited purchase popup",
-                )
-            return True
-
         purchase_closes = obs.exact("关闭")
         if obs.contains("购买道具") and len(purchase_closes) == 1:
             self.actions.click_row(purchase_closes[0], "close optional item purchase popup")
@@ -204,13 +190,67 @@ class OverlayFlow(object):
         return False
 
     def handle_confirm(self, obs):
-        for r in obs.matching(lambda row: row["text"] in ("确认", "是", "确队", "确趴", "确议")):
+        for r in obs.matching(lambda row: row["text"] in ("确认", "是", "确队", "确趴", "确议", "确汉")):
             self.actions.click_row(r, "confirm dialog")
             return True
         return False
 
     def handle_global_overlays(self, obs):
         """Resolve recognized blocking layers before any main-scene action."""
+
+        # Closing some promotion pages opens a confirmation while the covered
+        # promotion remains readable by OCR.  Resolve that modal before the
+        # generic promotion detector, otherwise the background's purchase
+        # markers make it click the promotion X again instead of the unique
+        # affirmative button.
+        if obs.contains("是否关闭购买窗口"):
+            close_confirms = obs.exact("是")
+            if len(close_confirms) == 1:
+                self.actions.click_row(
+                    close_confirms[0],
+                    "confirm closing limited purchase popup",
+                )
+            else:
+                self.actions.click_xy(
+                    "limited_purchase_close_confirm",
+                    "confirm closing limited purchase popup",
+                )
+            return True
+
+        # This collaboration gift modal can be present when the script starts.
+        # It covers the dice entrance, so CollaborationFlow is not enabled yet
+        # (`started` is false and the entrance icon is hidden). Resolve it at
+        # global-overlay priority using three independent modal anchors.
+        collaboration_gift_claims = obs.exact("收取")
+        if (
+            obs.contains("礼袋奖励")
+            and obs.contains("联动礼盒")
+            and len(collaboration_gift_claims) == 1
+        ):
+            self.actions.click_row(
+                collaboration_gift_claims[0],
+                "claim collaboration gift-box reward before flow ownership",
+            )
+            return True
+
+        # Story progression never enters Cairos Dungeon. Its full-screen
+        # selector can be opened accidentally from the world map, but it is
+        # neither a story stage list nor a recognized world-map scene. Close
+        # only after proving the selector with independent title, stage-state,
+        # and tab anchors; never start this optional dungeon.  The short
+        # battle-button label is deliberately excluded because ML Kit has
+        # rendered it as `战乎` on the live 1080x720 selector.
+        if (
+            obs.contains("卡伊洛斯地下城")
+            and obs.contains("地下1层")
+            and obs.contains("准备完成")
+            and obs.contains("攻略信息")
+            and obs.contains("掉落信息")
+        ):
+            self.actions.press_back(
+                "leave accidentally opened Cairos Dungeon selector",
+            )
+            return True
 
         # This is a known global modal, so its confirmation is safe before
         # scene routing. Unknown confirmation buttons are handled last.
@@ -226,6 +266,25 @@ class OverlayFlow(object):
         ):
             self.actions.click_xy("inbox_close", "close auto-opened story inbox")
             return True
+
+        # Login-reward event pages cover the home controls but contain none of
+        # the purchase affordances used to classify promotion pages.  Require
+        # the title plus both explanatory anchors, then locate the self-drawn
+        # X visually so rotating artwork and panel offsets remain harmless.
+        # OCR may return the title and the explanatory paragraph in separate
+        # passes on slower devices.  Either the specific title, or both stable
+        # paragraph anchors, is enough to request the strict X-shape detector.
+        login_reward_overlay = obs.contains("签到活动") or obs.contains_all(
+            "每天登录", "领取奖励"
+        )
+        if login_reward_overlay:
+            login_reward_close = find_top_right_close_button()
+            if login_reward_close is not None:
+                self.actions.click_point(
+                    login_reward_close,
+                    "close login reward activity overlay by visual X",
+                )
+                return True
 
         # Promotion titles and artwork rotate. Generic purchase affordances
         # establish the page class; the click itself comes from visual X-shape

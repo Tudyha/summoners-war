@@ -24,7 +24,7 @@ class AutomationEngine(object):
         return DecisionContext(self.runner, snapshot)
 
     def run_forever(self):
-        ensure_game()
+        # ensure_game()
         width, height = display_size()
         print("[runner] display {}x{} landscape".format(width, height))
         print("[runner] reactive screen-driven engine started")
