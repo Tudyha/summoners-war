@@ -11,6 +11,7 @@ from ..core.collaboration_rules import (
     parse_achievement_count,
     parse_fraction,
     parse_integer,
+    parse_skill_level,
 )
 from ..core.run_state import CollaborationPhase, SummonScrollKind
 from ..core.scene_recognizer import home_visible
@@ -165,6 +166,27 @@ class CollaborationFlow(object):
                 available.add(nearest)
         return available
 
+    def _selected_skill_level(self, obs):
+        levels = []
+        for row in self._rows_in_reference_box(obs, 140, 470, 715, 535):
+            level = parse_skill_level(row["text"])
+            if level is not None:
+                levels.append(level)
+        return max(levels) if levels else None
+
+    def _finish_skill_upgrades_for_run(self, reason):
+        state = self.state.collaboration
+        state.skill_checked_run = state.run_count
+        state.skill_step = "select"
+        state.pending_skill_index = None
+        state.pending_skill_level = None
+        state.skill_no_progress_checks = 0
+        self.actions.click_xy(
+            "collaboration_collection_close",
+            reason,
+        )
+        return True
+
     def _handle_skill(self, obs):
         state = self.state.collaboration
         if state.skill_step == "select":
@@ -181,6 +203,8 @@ class CollaborationFlow(object):
                 )
                 self._click_reference(point, "inspect prioritized collaboration skill")
                 state.pending_skill_index = skill_index
+                state.pending_skill_level = None
+                state.skill_no_progress_checks = 0
                 state.skill_step = "inspect"
                 return True
 
@@ -195,7 +219,7 @@ class CollaborationFlow(object):
             skill_point = config.COLLABORATION_SKILLS[
                 state.pending_skill_index
             ][0]
-            if obs.contains("满级") or selected_skill_is_maxed(skill_point):
+            if selected_skill_is_maxed(skill_point):
                 print(
                     "[collaboration] prioritized skill index={} is maxed".format(
                         state.pending_skill_index
@@ -203,24 +227,75 @@ class CollaborationFlow(object):
                 )
                 state.maxed_skill_indices.add(state.pending_skill_index)
                 state.pending_skill_index = None
+                state.pending_skill_level = None
+                state.skill_no_progress_checks = 0
                 state.skill_step = "select"
                 return True
 
+            state.pending_skill_level = self._selected_skill_level(obs)
             self.actions.click_xy(
                 "collaboration_skill_upgrade",
                 "upgrade selected collaboration skill",
             )
-            state.skill_step = "close"
+            state.skill_no_progress_checks = 0
+            state.skill_step = "verify"
             return True
 
-        state.skill_checked_run = state.run_count
-        state.skill_step = "select"
-        state.pending_skill_index = None
-        self.actions.click_xy(
-            "collaboration_collection_close",
-            "close collaboration skill screen after upgrade",
+        if state.skill_step == "verify":
+            skill_point = config.COLLABORATION_SKILLS[
+                state.pending_skill_index
+            ][0]
+            if selected_skill_is_maxed(skill_point):
+                print(
+                    "[collaboration] prioritized skill index={} reached max level".format(
+                        state.pending_skill_index
+                    )
+                )
+                state.maxed_skill_indices.add(state.pending_skill_index)
+                state.pending_skill_index = None
+                state.pending_skill_level = None
+                state.skill_no_progress_checks = 0
+                state.skill_step = "select"
+                return True
+
+            current_level = self._selected_skill_level(obs)
+            if current_level is None:
+                state.skill_no_progress_checks += 1
+                if state.skill_no_progress_checks < 2:
+                    return True
+                return self._finish_skill_upgrades_for_run(
+                    "close collaboration skill screen when level verification is unavailable"
+                )
+
+            if (
+                state.pending_skill_level is not None
+                and current_level <= state.pending_skill_level
+            ):
+                state.skill_no_progress_checks += 1
+                if state.skill_no_progress_checks < 2:
+                    return True
+                return self._finish_skill_upgrades_for_run(
+                    "close collaboration skill screen when upgrade resources are insufficient"
+                )
+
+            print(
+                "[collaboration] upgraded prioritized skill index={} level {}->{}".format(
+                    state.pending_skill_index,
+                    state.pending_skill_level,
+                    current_level,
+                )
+            )
+            state.pending_skill_level = current_level
+            state.skill_no_progress_checks = 0
+            self.actions.click_xy(
+                "collaboration_skill_upgrade",
+                "upgrade selected collaboration skill again",
+            )
+            return True
+
+        return self._finish_skill_upgrades_for_run(
+            "close collaboration skill screen after unexpected upgrade state"
         )
-        return True
 
     def _handle_prepare(self, obs):
         state = self.state.collaboration
@@ -260,6 +335,7 @@ class CollaborationFlow(object):
             state.shop_step = "select"
             state.shop_completed = False
             state.shop_attempts = 0
+            state.pending_shop_coins = None
             return True
 
         if state.prepare_step == "select_old":
@@ -351,6 +427,7 @@ class CollaborationFlow(object):
                 )
             state.shop_completed = True
             state.shop_step = "finish"
+            state.pending_shop_coins = None
             return True
 
         if (
@@ -367,14 +444,40 @@ class CollaborationFlow(object):
                     (444, 425), "confirm collaboration item purchase or upgrade"
                 )
             state.shop_visit_count += 1
-            state.shop_completed = True
-            state.shop_step = "finish"
+            # Return to the shop and keep spending while another upgrade can
+            # be confirmed. A successful purchase resets the consecutive
+            # no-confirm attempts used to prove that all candidates are maxed.
+            state.shop_attempts = 0
+            state.pending_shop_coins = None
+            state.shop_step = "select"
             return True
 
         if state.shop_step == "confirm":
-            # The prior upgrade click did not produce a confirmation dialog.
-            # Try the other guaranteed initial item once, then leave safely.
+            # Some owned items upgrade immediately without a confirmation.
+            # A lower balance proves that the prior click succeeded; continue
+            # spending instead of counting that item as an exhausted attempt.
+            current_coins = self._visible_integer(obs, (260, 510, 380, 585))
+            if (
+                state.pending_shop_coins is not None
+                and current_coins is not None
+                and current_coins < state.pending_shop_coins
+            ):
+                print(
+                    "[collaboration] collaboration item upgraded; coins {}->{}".format(
+                        state.pending_shop_coins,
+                        current_coins,
+                    )
+                )
+                state.shop_visit_count += 1
+                state.shop_attempts = 0
+                state.pending_shop_coins = None
+                state.shop_step = "select"
+                return True
+
+            # No confirmation and no balance change means this candidate is
+            # currently maxed or unavailable. Try the next distinct item.
             state.shop_attempts += 1
+            state.pending_shop_coins = None
             state.shop_step = "select"
             if state.shop_attempts >= len(config.COLLABORATION_SHOP_UPGRADES):
                 state.shop_completed = True
@@ -394,11 +497,13 @@ class CollaborationFlow(object):
             ]
             if coins is not None and coins < cost:
                 state.shop_completed = True
+                state.pending_shop_coins = None
                 self.actions.click_xy(
                     "collaboration_shop_confirm",
                     "continue when collaboration shop coins are insufficient",
                 )
                 return True
+            state.pending_shop_coins = coins
             self._click_reference(point, "select collaboration shop item to upgrade")
             state.shop_step = "upgrade"
             return True
@@ -522,6 +627,7 @@ class CollaborationFlow(object):
             state.shop_step = "select"
             state.shop_completed = False
             state.shop_attempts = 0
+            state.pending_shop_coins = None
             return True
 
         if self._shop_visible(obs):
@@ -534,6 +640,7 @@ class CollaborationFlow(object):
                 state.shop_step = "select"
                 state.shop_completed = False
                 state.shop_attempts = 0
+                state.pending_shop_coins = None
             self.actions.click_xy("collaboration_roll", "roll collaboration dice")
             state.roll_count += 1
             return True
@@ -553,6 +660,7 @@ class CollaborationFlow(object):
                 state.shop_step = "select"
                 state.shop_completed = False
                 state.shop_attempts = 0
+                state.pending_shop_coins = None
             if state.collection_checked_run < state.run_count:
                 collection_rows = obs.exact("收集")
                 if len(collection_rows) == 1:

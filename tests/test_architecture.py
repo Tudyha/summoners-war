@@ -303,6 +303,32 @@ class ArchitectureTests(unittest.TestCase):
         self.assertIn("self.actions.click_row(", home_handler)
         self.assertIn('"collaboration_skill": (78, 695)', config_source)
 
+    def test_collaboration_upgrades_skills_and_items_repeatedly(self):
+        source = (ROOT / "flows/collaboration.py").read_text(encoding="utf-8")
+        state_source = (ROOT / "core/run_state.py").read_text(encoding="utf-8")
+
+        skill_handler = source.split("    def _handle_skill", 1)[1].split(
+            "    def _handle_prepare", 1
+        )[0]
+        shop_handler = source.split("    def _handle_shop", 1)[1].split(
+            "    def _return_home", 1
+        )[0]
+        self.assertIn('state.skill_step = "verify"', skill_handler)
+        self.assertIn("current_level <= state.pending_skill_level", skill_handler)
+        self.assertIn("state.skill_no_progress_checks < 2", skill_handler)
+        self.assertIn("upgrade selected collaboration skill again", skill_handler)
+        self.assertNotIn('obs.contains("满级")', skill_handler)
+        self.assertIn("pending_skill_level", state_source)
+        self.assertIn("pending_shop_coins", state_source)
+        self.assertIn("state.shop_attempts = 0", shop_handler)
+        self.assertIn("current_coins < state.pending_shop_coins", shop_handler)
+        self.assertIn("collaboration item upgraded; coins {}->{}", shop_handler)
+        confirmation = shop_handler.split(
+            "is_shop_upgrade_confirmation(obs.texts)", 1
+        )[1].split('if state.shop_step == "confirm":', 1)[0]
+        self.assertIn('state.shop_step = "select"', confirmation)
+        self.assertNotIn("state.shop_completed = True", confirmation)
+
     def test_collaboration_can_resume_from_an_internal_minigame_screen(self):
         source = (ROOT / "runner.py").read_text(encoding="utf-8")
 

@@ -69,6 +69,14 @@ def parse_integer(text):
     return int(normalized)
 
 
+def parse_skill_level(text):
+    """Parse the selected skill detail label, for example ``增加体力 6级``."""
+    import re
+
+    match = re.search(r"(\d+)\s*级", str(text))
+    return int(match.group(1)) if match else None
+
+
 def is_shop_upgrade_confirmation(texts):
     """Match the shop prompt across simplified/traditional OCR output."""
     values = [str(text) for text in texts]

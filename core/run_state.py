@@ -116,6 +116,8 @@ class CollaborationState(object):
         self.skill_step = "select"
         self.maxed_skill_indices = set()
         self.pending_skill_index = None
+        self.pending_skill_level = None
+        self.skill_no_progress_checks = 0
         self.prepared_run = -1
         self.prepare_step = "select_old"
         self.replacement_slot_cursor = 0
@@ -125,6 +127,7 @@ class CollaborationState(object):
         self.shop_completed = False
         self.shop_visit_count = 0
         self.shop_attempts = 0
+        self.pending_shop_coins = None
         self.started = False
         # A fresh script may legitimately start inside the minigame. After an
         # account reset, however, one or more stale frames from the old account

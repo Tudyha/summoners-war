@@ -86,6 +86,11 @@ class CollaborationRulesTests(unittest.TestCase):
             rules.choose_skill_candidate(priority, {11}),
         )
 
+    def test_selected_skill_level_parser(self):
+        self.assertEqual(6, rules.parse_skill_level("增加体力 6级"))
+        self.assertEqual(12, rules.parse_skill_level("增加骰子12 级"))
+        self.assertIsNone(rules.parse_skill_level("技能升级"))
+
     def test_yellow_skill_badge_proves_max_level(self):
         self.assertFalse(rules.is_skill_max_badge(0.0))
         self.assertFalse(rules.is_skill_max_badge(0.02))
